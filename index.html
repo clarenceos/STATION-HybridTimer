@@ -185,6 +185,18 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
   font-family: 'Fugaz One', cursive;
   font-size: 120px; color: var(--neon);
   line-height: 1;
+  animation: countPop 0.3s ease forwards;
+}
+
+@keyframes countPop {
+  0% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes lapPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.93); }
+  100% { transform: scale(1); }
 }
 #countdown-label {
   font-family: 'Barlow Condensed', sans-serif;
@@ -234,8 +246,14 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
   display: inline-block; padding: 2px 8px; border-radius: 6px;
   font-family: 'Barlow Condensed', sans-serif; font-weight: 800;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-  background: var(--surface2); color: var(--text3); border: 1px solid var(--border2);
 }
+.eq-cardio      { background: rgba(255,87,34,0.15); color: var(--orange); border: 1px solid rgba(255,87,34,0.3); }
+.eq-kettlebell  { background: var(--neon-dim); color: var(--neon); border: 1px solid rgba(0,232,122,0.3); }
+.eq-dumbbell    { background: rgba(68,136,255,0.15); color: #4488FF; border: 1px solid rgba(68,136,255,0.3); }
+.eq-barbell     { background: rgba(153,102,255,0.15); color: #9966FF; border: 1px solid rgba(153,102,255,0.3); }
+.eq-medicine_ball { background: rgba(255,204,0,0.15); color: #FFCC00; border: 1px solid rgba(255,204,0,0.3); }
+.eq-sandbag     { background: rgba(204,136,68,0.15); color: #CC8844; border: 1px solid rgba(204,136,68,0.3); }
+.eq-bodyweight  { background: var(--surface2); color: var(--text2); border: 1px solid var(--border2); }
 
 /* TABS */
 .tab-bar {
@@ -274,6 +292,9 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
   padding: 0;
   display: none;
   flex-direction: column;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
 }
 #screen-timer.active { display: flex; }
 
@@ -298,16 +319,7 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
 .progress-dot.done { background: var(--neon); }
 .progress-dot.current { background: var(--orange); width: 10px; height: 10px; }
 
-/* LANDSCAPE */
-@media (orientation: landscape) and (min-width: 768px) {
-  #timer-main-layout {
-    display: flex !important; flex-direction: row !important;
-    height: 100vh !important;
-  }
-  #timer-left { flex: 2; overflow-y: auto; }
-  #timer-right { flex: 1; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 16px; }
-  #timer-right-mobile { display: none !important; }
-}
+/* LANDSCAPE handled via JS checkLandscape() */
 
 /* STATION LIST ITEM */
 .station-item {
@@ -497,18 +509,29 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
 /* TIMER LAYOUT */
 .timer-top-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px 8px;
-  padding-top: max(12px, env(safe-area-inset-top));
+  padding: 8px 16px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  flex-shrink: 0;
 }
 .timer-content {
-  flex: 1; overflow-y: auto; padding: 0 16px 8px;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
 }
 .timer-lap-bar {
-  padding: 12px 16px;
+  flex-shrink: 0;
+  padding: 10px 16px;
   padding-bottom: max(16px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: var(--bg);
 }
+.now-card { padding: 10px 14px; margin-bottom: 0; }
+.timer-display-card { padding: 12px 16px; margin-bottom: 0; }
+.next-card { padding: 10px 14px; margin-bottom: 0; }
 
 /* NOW CARD */
 .now-card {
@@ -678,6 +701,19 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
 <!-- TOAST -->
 <div id="toast"></div>
 
+<!-- PAUSE OVERLAY -->
+<div id="pause-overlay" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:24px;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px 24px;width:100%;max-width:340px;text-align:center;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:2px;color:var(--text3);margin-bottom:12px;">WORKOUT PAUSED</div>
+    <div id="pause-counter" style="font-family:'Fugaz One',cursive;font-size:64px;color:var(--orange);line-height:1;letter-spacing:-2px;">00:00</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--orange);margin-top:4px;margin-bottom:24px;">RESTING</div>
+    <div style="display:flex;gap:12px;">
+      <button class="btn btn-danger btn-full" onclick="stopWorkout()" style="height:52px;">Stop</button>
+      <button class="btn btn-neon btn-full" onclick="resumeTimer()" style="height:52px;">&#9654; Resume</button>
+    </div>
+  </div>
+</div>
+
 <!-- COUNTDOWN -->
 <div id="countdown-overlay">
   <div id="countdown-label">GET READY</div>
@@ -700,6 +736,7 @@ const S = {
     stationIdx: 0,
     stationActiveMs: 0,
     stationSegmentStartMs: 0,
+    stationSegmentStartOffset: 0,
     stationSegments: [],
     completedStationTimes: [],
     laps: [], currentLapNumber: 1,
@@ -709,6 +746,21 @@ const S = {
   },
   summaryId: null,
   journalId: null
+};
+
+// ============================================================
+// ICONS
+// ============================================================
+const icons = {
+  gear: `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="2.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42"/></svg>`,
+  lock: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="6" width="10" height="7" rx="2"/><path d="M4.5 6V4.5a2.5 2.5 0 015 0V6"/></svg>`,
+  pencil: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z"/></svg>`,
+  trash: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3.5h10M5 3.5V2.5h4v1M4.5 3.5l.5 8h5l.5-8"/></svg>`,
+  pause: `<svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><rect x="4" y="3" width="3.5" height="12" rx="1"/><rect x="10.5" y="3" width="3.5" height="12" rx="1"/></svg>`,
+  play: `<svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><path d="M5 3l11 6-11 6V3z"/></svg>`,
+  stop: `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>`,
+  journal: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="2" width="12" height="14" rx="2"/><path d="M6 6h6M6 9h6M6 12h4"/></svg>`,
+  eye: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 9s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="9" cy="9" r="2"/></svg>`
 };
 
 // ============================================================
@@ -754,8 +806,12 @@ function esc(s) {
 function uid() { return crypto.randomUUID(); }
 
 function eqLabel(eq) {
-  const map = { cardio:'CARDIO', kettlebell:'KB', dumbbell:'DB', barbell:'BAR', medicine_ball:'MED', sandbag:'BAG', bodyweight:'BW' };
-  return map[eq] || (eq||'').toUpperCase();
+  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight' };
+  return map[eq] || (eq || '').toUpperCase();
+}
+
+function eqBadge(eq) {
+  return `<span class="eq-badge eq-${eq || 'bodyweight'}">${eqLabel(eq)}</span>`;
 }
 
 function stationLabel(st, exercises, complexes) {
@@ -928,26 +984,148 @@ async function seedData() {
   if (existing.length > 0) return; // already seeded
 
   const prebuiltExercises = [
+    // CARDIO
     { id: uid(), name: 'Run', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
     { id: uid(), name: 'SkiErg', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
     { id: uid(), name: 'Row', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
     { id: uid(), name: 'Bike Erg', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Sled Push', equipment: 'sandbag', defaultWeight: 50, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Sled Pull', equipment: 'sandbag', defaultWeight: 50, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Burpee Broad Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Sandbag Lunges', equipment: 'sandbag', defaultWeight: 20, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'KB Farmer\'s Carry', equipment: 'kettlebell', defaultWeight: 24, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Wall Balls', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Deadlift', equipment: 'barbell', defaultWeight: 100, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Assault Bike', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Echo Bike', equipment: 'cardio', defaultWeight: 0, defaultReps: 0, defaultDistance: 1000, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // KETTLEBELL
     { id: uid(), name: 'KB Swing', equipment: 'kettlebell', defaultWeight: 24, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Box Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Pull-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Push-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Thruster', equipment: 'barbell', defaultWeight: 40, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Clean', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Press', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Snatch', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Goblet Squat', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Deadlift', equipment: 'kettlebell', defaultWeight: 32, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Row', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Thruster', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Front Squat', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Overhead Carry', equipment: 'kettlebell', defaultWeight: 24, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: "KB Farmer's Carry", equipment: 'kettlebell', defaultWeight: 24, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Turkish Get-Up', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Windmill', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Halo', equipment: 'kettlebell', defaultWeight: 12, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Lunge', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB High Pull', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Lateral Lunge', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Pistol Squat', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
     { id: uid(), name: 'Double KB Clean', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'DB Snatch', equipment: 'dumbbell', defaultWeight: 22.5, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Rope Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 100, defaultDistance: 0, notes: 'Double-unders', isPrebuilt: true, isComplex: false, useCount: 0 },
-    { id: uid(), name: 'Sandbag Clean', equipment: 'sandbag', defaultWeight: 30, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 }
+    { id: uid(), name: 'Double KB Press', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Front Squat', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Deadlift', equipment: 'kettlebell', defaultWeight: 24, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Row', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Snatch', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Thruster', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double KB Swing', equipment: 'kettlebell', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Push Press', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'KB Split Jerk', equipment: 'kettlebell', defaultWeight: 16, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // DUMBBELL
+    { id: uid(), name: 'DB Snatch', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Clean', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Press', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Row', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Deadlift', equipment: 'dumbbell', defaultWeight: 30, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Thruster', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Front Squat', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Goblet Squat', equipment: 'dumbbell', defaultWeight: 25, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Romanian Deadlift', equipment: 'dumbbell', defaultWeight: 25, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Lateral Raise', equipment: 'dumbbell', defaultWeight: 10, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Curl', equipment: 'dumbbell', defaultWeight: 15, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Skull Crusher', equipment: 'dumbbell', defaultWeight: 15, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Bent Over Row', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Arnold Press', equipment: 'dumbbell', defaultWeight: 15, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Lunge', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Step-Up', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: "DB Farmer's Carry", equipment: 'dumbbell', defaultWeight: 25, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Push Press', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Swing', equipment: 'dumbbell', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'DB Turkish Get-Up', equipment: 'dumbbell', defaultWeight: 15, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // BARBELL
+    { id: uid(), name: 'Deadlift', equipment: 'barbell', defaultWeight: 100, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Back Squat', equipment: 'barbell', defaultWeight: 80, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Front Squat', equipment: 'barbell', defaultWeight: 70, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Overhead Squat', equipment: 'barbell', defaultWeight: 50, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Clean', equipment: 'barbell', defaultWeight: 70, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Power Clean', equipment: 'barbell', defaultWeight: 70, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Clean and Jerk', equipment: 'barbell', defaultWeight: 70, defaultReps: 3, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Snatch', equipment: 'barbell', defaultWeight: 60, defaultReps: 3, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Power Snatch', equipment: 'barbell', defaultWeight: 60, defaultReps: 3, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Thruster', equipment: 'barbell', defaultWeight: 50, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Push Press', equipment: 'barbell', defaultWeight: 60, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Press', equipment: 'barbell', defaultWeight: 50, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Push Jerk', equipment: 'barbell', defaultWeight: 60, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Split Jerk', equipment: 'barbell', defaultWeight: 70, defaultReps: 3, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Romanian Deadlift', equipment: 'barbell', defaultWeight: 80, defaultReps: 8, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Good Morning', equipment: 'barbell', defaultWeight: 50, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Barbell Row', equipment: 'barbell', defaultWeight: 60, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sumo Deadlift', equipment: 'barbell', defaultWeight: 100, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Hang Clean', equipment: 'barbell', defaultWeight: 70, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Hang Snatch', equipment: 'barbell', defaultWeight: 60, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Barbell Lunge', equipment: 'barbell', defaultWeight: 50, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Barbell Step-Up', equipment: 'barbell', defaultWeight: 50, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Zercher Squat', equipment: 'barbell', defaultWeight: 60, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // MEDICINE BALL
+    { id: uid(), name: 'Wall Balls', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Slam', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Clean', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Throw', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Squat', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Russian Twist', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Lunge', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Step-Up', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Push-Up', equipment: 'medicine_ball', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Sit-Up', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Overhead Throw', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Med Ball Chest Pass', equipment: 'medicine_ball', defaultWeight: 9, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // SANDBAG
+    { id: uid(), name: 'Sandbag Lunges', equipment: 'sandbag', defaultWeight: 20, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Clean', equipment: 'sandbag', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Carry', equipment: 'sandbag', defaultWeight: 20, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Squat', equipment: 'sandbag', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Shouldering', equipment: 'sandbag', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Deadlift', equipment: 'sandbag', defaultWeight: 30, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Row', equipment: 'sandbag', defaultWeight: 20, defaultReps: 12, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Press', equipment: 'sandbag', defaultWeight: 20, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sandbag Bear Hug Squat', equipment: 'sandbag', defaultWeight: 20, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sled Push', equipment: 'sandbag', defaultWeight: 0, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sled Pull', equipment: 'sandbag', defaultWeight: 0, defaultReps: 0, defaultDistance: 50, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    // BODYWEIGHT
+    { id: uid(), name: 'Push-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Pull-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Chin-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Dip', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Ring Dip', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Ring Push-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Muscle-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Bar Muscle-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 5, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Handstand Push-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Pike Push-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Burpee', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Burpee Broad Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Box Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Box Step-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Jump Squat', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Air Squat', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Pistol Squat', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Lunge', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Walking Lunge', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Reverse Lunge', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Step-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Sit-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'V-Up', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Hollow Hold', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: 'seconds', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Plank', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 60, defaultDistance: 0, notes: 'seconds', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Side Plank', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: 'seconds each side', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Mountain Climber', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Superman', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Flutter Kick', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Rope Jump', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 50, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Double-Under', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Running High Knees', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 30, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Bear Crawl', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 0, defaultDistance: 20, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Inchworm', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'Hip Thrust', equipment: 'bodyweight', defaultWeight: 0, defaultReps: 20, defaultDistance: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 }
   ];
 
   for (const ex of prebuiltExercises) {
@@ -1083,12 +1261,14 @@ document.getElementById('modal-overlay').addEventListener('click', function(e) {
   if (e.target === this) hideModal();
 });
 
+let _sheetTimer = null;
+
 function showSheet(html) {
+  if (_sheetTimer) { clearTimeout(_sheetTimer); _sheetTimer = null; }
   const box = document.getElementById('sheet-box');
   const overlay = document.getElementById('sheet-overlay');
   box.innerHTML = html;
   overlay.classList.add('active');
-  // Trigger reflow for animation
   box.offsetHeight;
   box.classList.add('open');
 }
@@ -1098,7 +1278,7 @@ function hideSheet() {
   const overlay = document.getElementById('sheet-overlay');
   box.classList.remove('open');
   overlay.classList.remove('active');
-  setTimeout(() => { box.innerHTML = ''; }, 350);
+  _sheetTimer = setTimeout(() => { box.innerHTML = ''; _sheetTimer = null; }, 350);
 }
 
 let _toastTimer = null;
@@ -1138,26 +1318,30 @@ async function renderHome() {
   }
 
   document.getElementById('screen-home').innerHTML = `
-  <div style="padding-top: max(16px, env(safe-area-inset-top));">
-    <div class="flex-between" style="margin-bottom:24px;">
-      <div></div>
-      <button class="btn-ghost btn-sm" onclick="nav('settings')" aria-label="Settings" style="min-width:44px;width:44px;padding:0;font-size:20px;">⚙</button>
-    </div>
+  <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+    <div style="flex-shrink:0;padding:max(16px,env(safe-area-inset-top)) 20px 0;">
+      <div class="flex-between" style="margin-bottom:24px;">
+        <div></div>
+        <button class="btn-ghost btn-sm" onclick="nav('settings')" aria-label="Settings" style="min-width:44px;width:44px;padding:0;">${icons.gear}</button>
+      </div>
 
-    <div style="text-align:center;margin-bottom:32px;">
-      <div class="wordmark">STATION</div>
-      <div class="wordmark-sub">Workout Timer</div>
-    </div>
+      <div style="text-align:center;margin-bottom:32px;">
+        <div class="wordmark">STATION</div>
+        <div class="wordmark-sub">HYBRID TRAINING TIMER</div>
+      </div>
 
-    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
-      <button class="btn-neon btn-full" onclick="nav('wod-library')">WOD Library</button>
-      <button class="btn-orange btn-full" onclick="nav('wod-builder',{fresh:true})">WOD Builder</button>
-      <button class="btn-ghost btn-full" onclick="nav('exercises')">Exercise Builder</button>
-      <button class="btn-ghost btn-full" onclick="nav('history')">Station History</button>
-    </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
+        <button class="btn-neon btn-full" onclick="nav('wod-library')">WOD Library</button>
+        <button class="btn-orange btn-full" onclick="nav('wod-builder',{fresh:true})">WOD Builder</button>
+        <button class="btn-ghost btn-full" onclick="nav('exercises')">Exercise Builder</button>
+        <button class="btn-ghost btn-full" onclick="nav('history')">Station History</button>
+      </div>
 
-    ${recent.length > 0 ? `<div class="section-title">Recent Sessions</div>` : ''}
-    ${recentHtml}
+      ${recent.length > 0 ? `<div class="section-title">Recent Sessions</div>` : ''}
+    </div>
+    <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px env(safe-area-inset-bottom,24px);">
+      ${recentHtml}
+    </div>
   </div>`;
 }
 
@@ -1182,12 +1366,12 @@ async function renderExercises() {
   });
 
   const pills = [
-    { key: 'all', label: 'All' },
+    { key: 'all', label: 'ALL' },
     { key: 'cardio', label: 'Cardio' },
-    { key: 'kettlebell', label: 'KB' },
-    { key: 'dumbbell', label: 'DB' },
+    { key: 'kettlebell', label: 'Kettlebell' },
+    { key: 'dumbbell', label: 'Dumbbell' },
     { key: 'barbell', label: 'Barbell' },
-    { key: 'medicine_ball', label: 'Med Ball' },
+    { key: 'medicine_ball', label: 'Medicine Ball' },
     { key: 'sandbag', label: 'Sandbag' },
     { key: 'bodyweight', label: 'Bodyweight' }
   ];
@@ -1198,10 +1382,10 @@ async function renderExercises() {
 
   let exListHtml = '';
   for (const ex of filtered) {
-    const badge = `<span class="eq-badge">${eqLabel(ex.equipment)}</span>`;
+    const badge = eqBadge(ex.equipment);
     const lockOrEdit = ex.isPrebuilt
-      ? `<span style="color:var(--text3);font-size:16px;">🔒</span>`
-      : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();openEditExercise('${esc(ex.id)}')" style="min-width:36px;width:36px;padding:0;">✏</button>
+      ? `<span style="color:var(--text3);">${icons.lock}</span>`
+      : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();openEditExercise('${esc(ex.id)}')" style="min-width:36px;width:36px;padding:0;">${icons.pencil}</button>
          <button class="btn-sm btn-ghost" onclick="event.stopPropagation();deleteExercise('${esc(ex.id)}')" style="min-width:36px;width:36px;padding:0;color:var(--danger);border-color:var(--danger);">✕</button>`;
     const useCountBadge = ex.useCount > 0 ? `<span style="font-size:11px;color:var(--text3);margin-left:4px;">${ex.useCount}×</span>` : '';
     exListHtml += `
@@ -1223,8 +1407,8 @@ async function renderExercises() {
   for (const cx of allCx) {
     const chain = cx.movements.map(m => `${m.reps}\u00D7 ${m.name}`).join(' \u2192 ');
     const lockOrEdit = cx.isPrebuilt
-      ? `<span style="color:var(--text3);font-size:16px;">🔒</span>`
-      : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();openEditComplex('${esc(cx.id)}')" style="min-width:36px;width:36px;padding:0;">✏</button>
+      ? `<span style="color:var(--text3);">${icons.lock}</span>`
+      : `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();openEditComplex('${esc(cx.id)}')" style="min-width:36px;width:36px;padding:0;">${icons.pencil}</button>
          <button class="btn-sm btn-ghost" onclick="event.stopPropagation();deleteComplex('${esc(cx.id)}')" style="min-width:36px;width:36px;padding:0;color:var(--danger);border-color:var(--danger);">✕</button>`;
     cxListHtml += `
     <div class="list-item">
@@ -1541,7 +1725,7 @@ async function renderWodBuilder() {
     <div class="nav-back" onclick="wodBuilderBack()">← Back</div>
     <div class="nav-title">WOD Builder</div>
     <div style="display:flex;gap:8px;">
-      <button class="btn-ghost btn-sm" onclick="previewWod()" style="font-size:16px;min-width:36px;width:36px;padding:0;" title="Preview">👁</button>
+      <button class="btn-ghost btn-sm" onclick="previewWod()" style="min-width:36px;width:36px;padding:0;" title="Preview">${icons.eye}</button>
       <button class="btn-neon btn-sm" onclick="saveWod()">Save</button>
     </div>
   </div>
@@ -1555,7 +1739,7 @@ async function renderWodBuilder() {
 
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
     <button class="btn-ghost btn-full" onclick="openAddStationSheet()">+ Add Station</button>
-    ${stations.length > 0 ? `<button class="btn-orange btn-full" onclick="startWodFromBuilder()">▶ Start Workout</button>` : ''}
+    ${stations.length > 0 ? `<button class="btn-orange btn-full" onclick="startWodFromBuilder()">${icons.play} Start Workout</button>` : ''}
   </div>`;
 }
 
@@ -1700,9 +1884,9 @@ function openAddStationSheet() {
     <div style="color:var(--text2);font-size:14px;">Choose station type</div>
   </div>
   <div style="display:flex;flex-direction:column;gap:10px;">
-    <button class="btn-orange btn-full" onclick="hideSheet();openStationPickerSheet('cardio')">Cardio</button>
-    <button class="btn-ghost btn-full" onclick="hideSheet();openStationPickerSheet('exercise')">Exercise</button>
-    <button class="btn-ghost btn-full" onclick="hideSheet();openStationPickerSheet('complex')">Complex</button>
+    <button class="btn-orange btn-full" onclick="openStationPickerSheet('cardio')">Cardio</button>
+    <button class="btn-ghost btn-full" onclick="openStationPickerSheet('exercise')">Exercise</button>
+    <button class="btn-ghost btn-full" onclick="openStationPickerSheet('complex')">Complex</button>
   </div>`);
 }
 
@@ -1877,7 +2061,7 @@ async function renderWodLibrary() {
       <div style="display:flex;gap:8px;">
         <button class="btn-ghost btn-sm flex1" onclick="previewLibraryWod('${esc(wod.id)}')">Preview</button>
         <button class="btn-ghost btn-sm flex1" onclick="editLibraryWod('${esc(wod.id)}','${wod.isPrebuilt}')">Edit${wod.isPrebuilt?' (Copy)':''}</button>
-        <button class="btn-neon btn-sm flex1" onclick="startLibraryWod('${esc(wod.id)}')">▶ Start</button>
+        <button class="btn-neon btn-sm flex1" onclick="startLibraryWod('${esc(wod.id)}')">${icons.play} Start</button>
       </div>
     </div>`;
   }
@@ -1922,7 +2106,7 @@ async function previewLibraryWod(id) {
   <div>${stHtml}</div>
   <div style="display:flex;gap:10px;margin-top:16px;">
     <button class="btn-ghost btn-full" onclick="hideModal()">Close</button>
-    <button class="btn-neon btn-full" onclick="hideModal();startLibraryWod('${esc(id)}')">▶ Start</button>
+    <button class="btn-neon btn-full" onclick="hideModal();startLibraryWod('${esc(id)}')">${icons.play} Start</button>
   </div>`);
 }
 
@@ -1998,6 +2182,9 @@ async function beginCountdown(wod) {
   let count = dur;
 
   function tick() {
+    numEl.style.animation = 'none';
+    numEl.offsetHeight;
+    numEl.style.animation = 'countPop 0.3s ease forwards';
     numEl.textContent = count;
     if (count > 0) {
       beep(440, 0.12, 0.5);
@@ -2026,6 +2213,7 @@ function startTimer() {
   t.paused = false;
   t.startMs = performance.now();
   t.stationSegmentStartMs = performance.now();
+  t.stationSegmentStartOffset = 0;
   t.stationSegments = [];
   t.stationActiveMs = 0;
   reqWakeLock();
@@ -2041,8 +2229,8 @@ function timerTick() {
   const stationMs = t.stationActiveMs + (nowMs - t.stationSegmentStartMs);
   const el = document.getElementById('timer-display');
   const st = document.getElementById('station-display');
-  if (el) el.textContent = fmtMM(elapsedMs / 1000);
-  if (st) st.textContent = fmtMM(stationMs / 1000);
+  if (el) el.textContent = fmtMM(stationMs / 1000);   // BIG = STATION
+  if (st) st.textContent = fmtMM(elapsedMs / 1000);   // SMALL = TOTAL
   t.rafId = requestAnimationFrame(timerTick);
 }
 
@@ -2060,13 +2248,13 @@ function pauseTimer() {
   if (!t.active || t.paused) return;
   const nowMs = performance.now();
   const segMs = nowMs - t.stationSegmentStartMs;
-  t.stationSegments.push({ durationMs: segMs });
+  t.stationSegments.push({ durationMs: segMs, startOffset: t.stationSegmentStartOffset });
   t.stationActiveMs += segMs;
   t.paused = true;
   t.pauseStartMs = performance.now();
   cancelAnimationFrame(t.rafId);
   relWakeLock();
-  renderTimerScreen();
+  document.getElementById('pause-overlay').style.display = 'flex';
   t.pauseRafId = requestAnimationFrame(pauseTick);
 }
 
@@ -2081,9 +2269,10 @@ function resumeTimer() {
   });
   t.paused = false;
   t.stationSegmentStartMs = performance.now();
+  t.stationSegmentStartOffset = performance.now() - t.startMs;
   cancelAnimationFrame(t.pauseRafId);
   reqWakeLock();
-  renderTimerScreen();
+  document.getElementById('pause-overlay').style.display = 'none';
   t.rafId = requestAnimationFrame(timerTick);
 }
 
@@ -2092,7 +2281,6 @@ function pressLap() {
   if (!t.active || t.paused) return;
   const nowMs = performance.now();
   const finalSegMs = nowMs - t.stationSegmentStartMs;
-  t.stationSegments.push({ durationMs: finalSegMs });
   const totalStationMs = t.stationActiveMs + finalSegMs;
   t.completedStationTimes.push(totalStationMs);
   const st = t.stations[t.stationIdx];
@@ -2110,22 +2298,18 @@ function pressLap() {
     completedStationTimes: t.completedStationTimes.slice(0, -1)
   };
 
+  // Add final segment with startOffset
+  t.stationSegments.push({ durationMs: finalSegMs, startOffset: t.stationSegmentStartOffset });
+
   // Record lap entries
-  if (t.stationSegments.length === 1) {
+  t.stationSegments.forEach((seg, segIdx) => {
     t.laps.push({
       lapNumber: lapNum, type: 'exercise', label,
-      duration: totalStationMs / 1000, continued: false,
-      startTime: nowMs - t.startMs
+      duration: seg.durationMs / 1000,
+      continued: segIdx > 0,
+      startTime: seg.startOffset
     });
-  } else {
-    t.stationSegments.forEach((seg, idx) => {
-      t.laps.push({
-        lapNumber: lapNum, type: 'exercise', label,
-        duration: seg.durationMs / 1000, continued: idx > 0,
-        startTime: nowMs - t.startMs
-      });
-    });
-  }
+  });
 
   t.currentLapNumber++;
   t.canUndo = true;
@@ -2133,6 +2317,8 @@ function pressLap() {
   t.stationActiveMs = 0;
   cancelAnimationFrame(t.rafId);
   beep(880, 0.15, 0.8);
+  const lapBtn = document.getElementById('lap-btn');
+  if (lapBtn) { lapBtn.style.animation = 'none'; lapBtn.offsetHeight; lapBtn.style.animation = 'lapPulse 0.2s ease'; }
 
   if (t.stationIdx >= t.stations.length - 1) {
     // Last station — workout complete
@@ -2142,6 +2328,7 @@ function pressLap() {
   } else {
     t.stationIdx++;
     t.stationSegmentStartMs = performance.now();
+    t.stationSegmentStartOffset = performance.now() - t.startMs;
     speak(getStationName(t.stations[t.stationIdx], t.exercises, t.complexes));
     renderTimerScreen();
     t.rafId = requestAnimationFrame(timerTick);
@@ -2171,16 +2358,34 @@ function showWorkoutCompleteModal() {
   const t = S.timer;
   const nowMs = performance.now();
   const totalMs = nowMs - t.startMs - t.totalPausedMs;
-
   showModal(`
   <div style="text-align:center;padding:8px 0;">
-    <div style="font-family:'Fugaz One',cursive;font-size:48px;color:var(--neon);margin-bottom:8px;">${fmtFull(totalMs/1000)}</div>
+    <div style="font-family:'Fugaz One',cursive;font-size:56px;color:var(--neon);margin-bottom:8px;letter-spacing:-2px;">${fmtFull(totalMs/1000)}</div>
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;text-transform:uppercase;margin-bottom:4px;">Workout Complete!</div>
-    <div style="color:var(--text2);font-size:14px;margin-bottom:20px;">${esc(t.wod ? t.wod.name : '')}</div>
-    <div style="display:flex;gap:10px;">
-      <button class="btn-ghost btn-full" onclick="hideModal();finishAndSaveSession()">Save &amp; View Summary</button>
+    <div style="color:var(--text2);font-size:14px;margin-bottom:24px;">${esc(t.wod ? t.wod.name : '')}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn btn-neon btn-full" onclick="hideModal();finishAndSaveSession()">Save &amp; View Summary</button>
+      <button class="btn btn-ghost btn-full" onclick="cancelLastLap()" style="color:var(--text2);font-size:14px;">&#8617; Return to Timer</button>
     </div>
   </div>`);
+}
+
+function cancelLastLap() {
+  hideModal();
+  const t = S.timer;
+  if (!t.undoBackup) { renderTimerScreen(); t.rafId = requestAnimationFrame(timerTick); return; }
+  t.laps = [...t.undoBackup.laps];
+  t.stationIdx = t.undoBackup.stationIdx;
+  t.stationSegments = [];
+  t.stationActiveMs = t.undoBackup.stationActiveMs;
+  t.stationSegmentStartMs = performance.now();
+  t.currentLapNumber = t.undoBackup.currentLapNumber;
+  t.completedStationTimes = [...t.undoBackup.completedStationTimes];
+  t.canUndo = false;
+  t.undoBackup = null;
+  t.active = true;
+  renderTimerScreen();
+  t.rafId = requestAnimationFrame(timerTick);
 }
 
 async function finishAndSaveSession() {
@@ -2294,97 +2499,73 @@ function renderTimerScreen() {
     ? t.stationActiveMs + (nowMs - t.stationSegmentStartMs)
     : t.stationActiveMs;
 
-  let timerInnerHtml = '';
-  if (t.paused) {
-    timerInnerHtml = `
-    <div id="timer-display">${fmtMM(stationMs / 1000)}</div>
-    <div class="timer-sublabel">STATION TIME</div>
-    <div class="timer-divider"></div>
-    <div class="paused-state-msg">⏸ PAUSED</div>
-    <div id="pause-counter">00:00</div>`;
-  } else {
-    timerInnerHtml = `
+  let timerInnerHtml = `
     <div id="timer-display">${fmtMM(stationMs / 1000)}</div>
     <div class="timer-sublabel">STATION TIME</div>
     <div class="timer-divider"></div>
     <div id="station-display" style="font-family:'Fugaz One',cursive;font-size:32px;color:var(--text2);">${fmtMM(elapsedMs / 1000)}</div>
-    <div class="timer-sublabel">TOTAL</div>`;
-  }
+    <div class="timer-sublabel">TOTAL TIME</div>`;
 
-  // Controls
-  let controlsHtml = '';
-  if (t.paused) {
-    controlsHtml = `
+  // Controls — always show undo/LAP/pause
+  let controlsHtml = `
     <div class="lap-controls-row">
-      <button class="btn-danger btn-full" onclick="stopWorkout()" style="height:56px;border-radius:14px;font-size:17px;">■ Stop</button>
-      <button class="btn-neon btn-full" onclick="resumeTimer()" style="height:56px;border-radius:14px;font-size:20px;">▶ Resume</button>
+      <button class="lap-btn-undo" onclick="undoLap()" title="Undo last lap" style="${t.canUndo ? '' : 'opacity:0.3;'}">↩</button>
+      <button id="lap-btn" class="lap-btn-main btn-orange" onclick="pressLap()">LAP</button>
+      <button class="lap-btn-pause" onclick="pauseTimer()">${icons.pause}</button>
     </div>`;
-  } else {
-    controlsHtml = `
-    <div class="lap-controls-row">
-      <button class="lap-btn-undo ${t.canUndo ? '' : ''}" onclick="undoLap()" title="Undo last lap" style="${t.canUndo ? '' : 'opacity:0.3;'}">↩</button>
-      <button class="lap-btn-main btn-orange" onclick="pressLap()">LAP</button>
-      <button class="lap-btn-pause" onclick="pauseTimer()">⏸</button>
-    </div>`;
-  }
 
-  // WOD panel for landscape (right side) — also used on portrait as hidden
-  let wodPanelHtml = `
-  <div id="timer-right" style="display:none;">
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;color:var(--text3);margin-bottom:10px;">WOD: ${esc(t.wod ? t.wod.name : '')}</div>
+  // WOD right-column content for landscape
+  let wodRightHtml = `
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:12px;">${esc(t.wod ? t.wod.name : '')}</div>
     ${stations.map((s, i) => {
       const lbl = stationLabel(s, exercises, complexes);
       const done = i < idx;
       const cur = i === idx;
-      return `<div class="wod-preview-station" style="${done ? 'opacity:0.4' : ''}">
-        <span class="wod-preview-num" style="${cur ? 'color:var(--orange)' : ''}">${i+1}</span>
+      const lapTime = t.completedStationTimes[i];
+      return `<div class="wod-preview-station" style="${done ? 'text-decoration:line-through;color:var(--text4);' : ''}">
+        <span class="wod-preview-num" style="${cur ? 'color:var(--orange)' : done ? 'color:var(--text4)' : ''}">${i+1}</span>
         <div style="flex:1;">
-          <div style="font-size:13px;color:${cur ? 'var(--text)' : 'var(--text2)'};font-family:'Barlow Condensed',sans-serif;font-weight:${cur ? '800':'400'};text-transform:uppercase;">${esc(lbl.split(' \u00B7 ')[0])}</div>
-          ${t.completedStationTimes[i] != null ? `<div style="font-family:'Fugaz One',cursive;font-size:12px;color:var(--neon);">${fmtMM(t.completedStationTimes[i]/1000)}</div>` : ''}
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:${cur ? 'var(--orange)' : done ? 'var(--text4)' : 'var(--text3)'};">${cur ? '● ' : ''}${esc(lbl.split(' \u00B7 ')[0])}</div>
         </div>
+        ${lapTime != null ? `<span style="font-family:'Fugaz One',cursive;font-size:13px;color:var(--neon-dim);">${fmtMM(lapTime/1000)}</span>` : ''}
       </div>`;
-    }).join('')}
-    <div class="divider"></div>
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">Laps</div>
-    ${t.laps.filter(l => l.type === 'exercise').map(l =>
-      `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border2);">
-        <span style="font-size:12px;color:var(--text2);font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;">${l.continued ? '↳' : l.lapNumber} · ${esc(l.label ? l.label.split(' \u00B7 ')[0] : '')}</span>
-        <span style="font-family:'Fugaz One',cursive;font-size:13px;color:var(--text);">${fmtMM(l.duration)}</span>
-      </div>`
-    ).join('')}
-  </div>`;
+    }).join('')}`;
 
   // VIEW WOD button (for portrait)
   let wodViewBtn = `<button class="btn-ghost btn-sm" onclick="showWodSidebar()" style="font-size:12px;padding:0 10px;height:32px;min-height:32px;">VIEW WOD</button>`;
 
   screen.innerHTML = `
-  <div id="timer-main-layout" style="display:flex;flex-direction:column;height:100%;min-height:100vh;">
-    <div class="timer-top-bar">
-      <div style="display:flex;align-items:center;gap:10px;flex:1;">
-        ${dotsHtml}
+  <div id="timer-main-layout" style="display:flex;flex-direction:row;height:100%;overflow:hidden;">
+    <!-- LEFT COLUMN -->
+    <div id="timer-left-col" style="display:flex;flex-direction:column;overflow:hidden;flex:1;">
+      <div class="timer-top-bar">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+          ${dotsHtml}
+        </div>
+        ${wodViewBtn}
       </div>
-      ${wodViewBtn}
-    </div>
 
-    <div class="timer-content" id="timer-left">
-      <div class="now-card">
-        <div class="now-label">Now</div>
-        <div class="now-name ${isCardio ? 'cardio' : ''}">${esc(stName.toUpperCase())}</div>
-        ${spec ? `<div class="now-spec">${esc(spec)}</div>` : ''}
+      <div class="timer-content" id="timer-left">
+        <div class="now-card">
+          <div class="now-label">Now</div>
+          <div class="now-name ${isCardio ? 'cardio' : ''}">${esc(stName.toUpperCase())}</div>
+          ${spec ? `<div class="now-spec">${esc(spec)}</div>` : ''}
+        </div>
+        ${complexHtml}
+        <div class="timer-display-card">
+          ${timerInnerHtml}
+        </div>
+        ${nextHtml}
       </div>
-      ${complexHtml}
-      <div class="timer-display-card">
-        ${timerInnerHtml}
+
+      <div class="timer-lap-bar">
+        ${controlsHtml}
       </div>
-      ${nextHtml}
-      <div id="timer-right-mobile" style="margin-top:0;"></div>
     </div>
-
-    <div class="timer-lap-bar">
-      ${controlsHtml}
+    <!-- RIGHT COLUMN: landscape only -->
+    <div id="timer-right-col" style="display:none;flex:0 0 42%;overflow-y:auto;background:var(--surface);border-left:1px solid var(--border);padding:16px;">
+      ${wodRightHtml}
     </div>
-
-    ${wodPanelHtml}
   </div>`;
 
   // Apply landscape check
@@ -2392,18 +2573,16 @@ function renderTimerScreen() {
 }
 
 function checkLandscape() {
-  const isLandscape = window.innerWidth >= 768 && window.innerWidth > window.innerHeight;
-  const rightPanel = document.getElementById('timer-right');
-  const mainLayout = document.getElementById('timer-main-layout');
-  if (!rightPanel || !mainLayout) return;
+  const isLandscape = window.innerWidth >= 700 && window.innerWidth > window.innerHeight;
+  const right = document.getElementById('timer-right-col');
+  const leftCol = document.getElementById('timer-left-col');
+  if (!right) return;
   if (isLandscape) {
-    rightPanel.style.display = 'block';
-    mainLayout.style.flexDirection = 'row';
-    mainLayout.style.height = '100vh';
+    right.style.display = 'block';
+    if (leftCol) leftCol.style.flex = '0 0 58%';
   } else {
-    rightPanel.style.display = 'none';
-    mainLayout.style.flexDirection = 'column';
-    mainLayout.style.height = '';
+    right.style.display = 'none';
+    if (leftCol) leftCol.style.flex = '1';
   }
 }
 
@@ -2462,26 +2641,18 @@ async function renderSummary(sessionId) {
     if (l.type === 'pause') {
       lapsHtml += `
       <div class="lap-row lap-pause">
-        <span class="lap-num">—</span>
-        <span class="lap-label" style="color:var(--orange);font-size:13px;">Paused</span>
+        <span class="lap-num" style="color:var(--orange);">&#8212;</span>
+        <span class="lap-label" style="color:var(--orange);">Paused</span>
         <span class="lap-dur" style="color:var(--orange);font-size:13px;">${fmtMM(l.duration || 0)}</span>
       </div>`;
     } else {
+      const namePart = (l.label || '').split(' · ')[0];
       const isCont = l.continued;
-      const labelParts = (l.label || '').split(' \u00B7 ');
-      const namePart = labelParts[0] || '';
-      const specPart = labelParts.slice(1).join(' \u00B7 ');
+      const displayName = isCont ? namePart + ' cont.' : namePart;
       lapsHtml += `
-      <div class="lap-row" style="${isCont ? 'padding-left:20px;' : ''}">
-        <span class="lap-num" style="${isCont ? 'color:var(--text3);font-size:12px;' : ''}">
-          ${isCont ? '↳' : l.lapNumber || ''}
-        </span>
-        <div class="lap-label" style="display:flex;flex-direction:column;gap:1px;">
-          <span style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;color:${isCont ? 'var(--text3)' : 'var(--text)'};">
-            ${esc(namePart)}${isCont ? ' <span style="font-size:11px;color:var(--text3);">cont.</span>' : ''}
-          </span>
-          ${specPart ? `<span style="font-size:11px;color:var(--text3);">${esc(specPart)}</span>` : ''}
-        </div>
+      <div class="lap-row" style="${isCont ? 'opacity:0.7;' : ''}">
+        <span class="lap-num">${l.lapNumber || ''}</span>
+        <span class="lap-label" style="font-family:'Barlow Condensed',sans-serif;font-weight:800;text-transform:uppercase;font-size:14px;">${esc(displayName)}</span>
         <span class="lap-dur">${fmtMM(l.duration || 0)}</span>
       </div>`;
     }
@@ -2493,8 +2664,8 @@ async function renderSummary(sessionId) {
 
   const pending = session.journalPending;
   const journalBtn = pending
-    ? `<button class="btn-orange btn-full" onclick="nav('journal',{sessionId:'${esc(sessionId)}'})" style="margin-top:10px;">📝 Complete Journal</button>`
-    : `<button class="btn-ghost btn-full" onclick="nav('journal',{sessionId:'${esc(sessionId)}'})" style="margin-top:10px;">View Journal</button>`;
+    ? `<button class="btn-orange btn-full" onclick="nav('journal',{sessionId:'${esc(sessionId)}'})" style="margin-top:10px;">${icons.journal} Complete Journal</button>`
+    : `<button class="btn-ghost btn-full" onclick="nav('journal',{sessionId:'${esc(sessionId)}'})" style="margin-top:10px;">${icons.journal} View Journal</button>`;
 
   document.getElementById('screen-summary').innerHTML = `
   <div class="nav-header">
@@ -2527,52 +2698,67 @@ async function copyMarkdown(sessionId) {
   const session = await DB.get('sessions', sessionId);
   if (!session) return;
   const laps = [...(session.laps || [])].sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
+
   let md = `# ${session.wodName || 'Workout'}\n`;
   md += `**Date:** ${fmtDate(session.startedAt)}\n\n`;
-  md += `## Lap Breakdown\n\n`;
+  md += `| # | Station | Duration |\n|---|---------|----------|\n`;
   for (const l of laps) {
     if (l.type === 'pause') {
-      md += `- *(Paused: ${fmtMM(l.duration || 0)})*\n`;
+      md += `| — | Paused | ${fmtMM(l.duration || 0)} |\n`;
     } else {
-      const prefix = l.continued ? '  ↳' : `${l.lapNumber}.`;
-      md += `${prefix} ${l.label || ''} — **${fmtMM(l.duration || 0)}**\n`;
+      const name = ((l.label || '').split(' · ')[0]) + (l.continued ? ' cont.' : '');
+      md += `| ${l.lapNumber || ''} | ${name} | ${fmtMM(l.duration || 0)} |\n`;
     }
   }
   const totalEx = laps.filter(l => l.type === 'exercise').reduce((s, l) => s + (l.duration || 0), 0);
-  md += `\n**Total:** ${fmtFull(totalEx)}\n`;
+  md += `| **TOTAL** | | **${fmtFull(totalEx)}** |\n`;
 
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(md);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = md;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
+      toast('Copied to clipboard!');
+      return;
     }
-    toast('Copied to clipboard!');
-  } catch(e) {
-    toast('Could not copy — try exporting instead');
-  }
+  } catch(e) {}
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = md;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(0, 99999);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) { toast('Copied to clipboard!'); return; }
+  } catch(e) {}
+
+  showModal(`
+  <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">Copy Manually</div>
+    <button class="btn btn-ghost btn-sm" onclick="hideModal()" style="min-width:36px;width:36px;padding:0;">&#x2715;</button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:8px;">Select all and copy:</div>
+  <textarea style="width:100%;height:200px;font-size:12px;font-family:monospace;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);" onclick="this.select()">${md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+  <button class="btn btn-neon btn-full" onclick="this.previousElementSibling.select()" style="margin-top:12px;">Select All</button>`);
 }
 
 async function exportCSV(sessionId) {
   const session = await DB.get('sessions', sessionId);
   if (!session) return;
   const laps = [...(session.laps || [])].sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
-  let csv = 'Lap,Type,Label,Duration (s),Continued\n';
+  let csv = 'Lap,Station,Duration\n';
   for (const l of laps) {
-    const type = l.type || '';
-    const label = (l.label || '').replace(/,/g, ';');
-    const dur = (l.duration || 0).toFixed(1);
-    const cont = l.continued ? 'yes' : 'no';
-    const lapNum = l.lapNumber || '';
-    csv += `${lapNum},${type},${label},${dur},${cont}\n`;
+    if (l.type === 'pause') {
+      csv += `,Paused,${fmtMM(l.duration||0)}\n`;
+    } else {
+      const namePart = (l.label || '').split(' · ')[0];
+      const isCont = l.continued;
+      csv += `${l.lapNumber || ''},${isCont ? namePart+' cont.' : namePart},${fmtMM(l.duration||0)}\n`;
+    }
   }
+  const totalExSecs = laps.filter(l => l.type === 'exercise').reduce((s, l) => s + (l.duration || 0), 0);
+  csv += `TOTAL,,${fmtFull(totalExSecs)}\n`;
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2722,7 +2908,7 @@ async function renderSettings() {
   ).join('');
 
   const voiceOptions = [
-    { v: 'female', l: 'Female' },
+    { v: 'female', l: 'On' },
     { v: 'none', l: 'Off' }
   ].map(o =>
     `<button class="pill ${settings.voiceMode === o.v ? 'active' : ''}" onclick="setVoice('${o.v}')">${o.l}</button>`
@@ -2763,7 +2949,7 @@ async function renderSettings() {
   </div>
 
   <div style="margin-top:24px;">
-    <button class="btn-danger btn-full" onclick="confirmNukeData()">🗑 Reset All Data</button>
+    <button class="btn-danger btn-full" onclick="confirmNukeData()">${icons.trash} Reset All Data</button>
   </div>`;
 }
 
@@ -2787,8 +2973,19 @@ function confirmNukeData() {
   showModal(`
   <div style="text-align:center;padding:8px 0;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;margin-bottom:12px;color:var(--danger);">Reset All Data?</div>
-    <div style="color:var(--text2);margin-bottom:8px;font-size:15px;">This will delete ALL your workouts, exercises, and history.</div>
-    <div style="color:var(--danger);margin-bottom:20px;font-size:13px;font-weight:600;">This cannot be undone.</div>
+    <div style="color:var(--text2);margin-bottom:20px;font-size:15px;">All workouts, exercises, and history will be permanently deleted.</div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+      <button class="btn-danger btn-full" onclick="confirmNukeData2()">Yes, Continue</button>
+    </div>
+  </div>`);
+}
+
+function confirmNukeData2() {
+  showModal(`
+  <div style="text-align:center;padding:8px 0;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;margin-bottom:12px;color:var(--danger);">Are You Absolutely Sure?</div>
+    <div style="color:var(--danger);margin-bottom:20px;font-size:14px;font-weight:600;">This cannot be undone. Everything will be gone.</div>
     <div style="display:flex;gap:10px;">
       <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
       <button class="btn-danger btn-full" onclick="nukeData()">Delete Everything</button>
@@ -2803,6 +3000,8 @@ async function nukeData() {
   await DB.clear('sessions');
   await DB.clear('settings');
   hideModal();
+  S.settings = { darkMode: true, countdownDuration: 3, voiceMode: 'female' };
+  applyTheme();
   toast('All data cleared. Reloading...');
   setTimeout(() => window.location.reload(), 1500);
 }
