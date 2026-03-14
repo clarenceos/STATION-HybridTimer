@@ -254,6 +254,7 @@ label { font-family: 'Barlow', sans-serif; font-size: 13px; color: var(--text2);
 .eq-medicine_ball { background: rgba(255,204,0,0.15); color: #FFCC00; border: 1px solid rgba(255,204,0,0.3); }
 .eq-sandbag     { background: rgba(204,136,68,0.15); color: #CC8844; border: 1px solid rgba(204,136,68,0.3); }
 .eq-bodyweight  { background: var(--surface2); color: var(--text2); border: 1px solid var(--border2); }
+.eq-interval { background: rgba(100,160,255,0.15); color: #64A0FF; border: 1px solid rgba(100,160,255,0.3); }
 
 /* TABS */
 .tab-bar {
@@ -742,7 +743,9 @@ const S = {
     laps: [], currentLapNumber: 1,
     canUndo: false, undoBackup: null,
     wakeLock: null, rafId: null, pauseRafId: null,
-    sessionId: null, wod: null, stations: [], exercises: [], complexes: []
+    sessionId: null, wod: null, stations: [], exercises: [], complexes: [],
+    intervalEndMs: 0,
+    intervalRemaining: 0
   },
   summaryId: null,
   journalId: null
@@ -815,7 +818,7 @@ function uid() {
 }
 
 function eqLabel(eq) {
-  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight' };
+  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight', interval:'Interval' };
   return map[eq] || (eq || '').toUpperCase();
 }
 
@@ -823,7 +826,23 @@ function eqBadge(eq) {
   return `<span class="eq-badge eq-${eq || 'bodyweight'}">${eqLabel(eq)}</span>`;
 }
 
+function isIntervalStation(st, exercises) {
+  if (!st || st.type !== 'exercise') return false;
+  const ex = exercises && exercises.find(e => e.id === st.exerciseId);
+  return !!(ex && ex.equipment === 'interval');
+}
+
+function getIntervalDuration(st) {
+  return (st.time || 60) * 1000;
+}
+
 function stationLabel(st, exercises, complexes) {
+  if (st.type === 'exercise') {
+    const exCheck = exercises && exercises.find(e => e.id === st.exerciseId);
+    if (exCheck && exCheck.equipment === 'interval') {
+      return `${exCheck.name.toUpperCase()} \u00B7 ${fmtMM((st.time || 0))}`;
+    }
+  }
   if (st.type === 'cardio' || st.type === 'exercise') {
     const ex = exercises.find(e => e.id === st.exerciseId);
     if (!ex) return 'Station';
@@ -1137,6 +1156,20 @@ async function seedData() {
     await DB.put('exercises', ex);
   }
 
+  // Seed interval presets
+  const existingInterval = (await DB.all('exercises')).find(e => e.equipment === 'interval');
+  if (!existingInterval) {
+    const intervalExercises = [
+      { id: uid(), name: 'Warmup', equipment: 'interval', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 300, notes: 'General warmup', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'Rest', equipment: 'interval', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 60, notes: 'Recovery between stations', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'Cooldown', equipment: 'interval', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 300, notes: 'Post-workout cooldown', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'Transition', equipment: 'interval', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 20, notes: 'Quick transition between exercises', isPrebuilt: true, isComplex: false, useCount: 0 }
+    ];
+    for (const ex of intervalExercises) {
+      await DB.put('exercises', ex);
+    }
+  }
+
   // Prebuilt complexes
   const exMap = {};
   for (const ex of prebuiltExercises) exMap[ex.name] = ex.id;
@@ -1376,6 +1409,7 @@ async function renderExercises() {
   const pills = [
     { key: 'all', label: 'ALL' },
     { key: 'cardio', label: 'Cardio' },
+    { key: 'interval', label: 'Intervals' },
     { key: 'kettlebell', label: 'Kettlebell' },
     { key: 'dumbbell', label: 'Dumbbell' },
     { key: 'barbell', label: 'Barbell' },
@@ -1538,11 +1572,12 @@ function exerciseModalHtml(ex) {
   const weight = ex ? (ex.defaultWeight || '') : '';
   const reps = ex ? (ex.defaultReps || '') : '';
   const dist = ex ? (ex.defaultDistance || '') : '';
+  const time = ex ? (ex.defaultTime || '') : '';
   const notes = ex ? esc(ex.notes || '') : '';
 
   const eqOptions = [
     ['bodyweight','Bodyweight'],['kettlebell','Kettlebell'],['dumbbell','Dumbbell'],
-    ['barbell','Barbell'],['medicine_ball','Medicine Ball'],['sandbag','Sandbag'],['cardio','Cardio']
+    ['barbell','Barbell'],['medicine_ball','Medicine Ball'],['sandbag','Sandbag'],['cardio','Cardio'],['interval','Interval']
   ].map(([v,l]) => `<option value="${v}" ${eq===v?'selected':''}>${l}</option>`).join('');
 
   return `
@@ -1559,7 +1594,7 @@ function exerciseModalHtml(ex) {
     <select id="ex-eq" onchange="exEqChange()">${eqOptions}</select>
   </div>
   <div id="ex-fields-wrap">
-    ${exerciseFieldsHtml(eq, weight, reps, dist)}
+    ${exerciseFieldsHtml(eq, weight, reps, dist, time)}
   </div>
   <div class="form-row">
     <label>Notes (optional)</label>
@@ -1571,11 +1606,17 @@ function exerciseModalHtml(ex) {
   </div>`;
 }
 
-function exerciseFieldsHtml(eq, weight, reps, dist) {
+function exerciseFieldsHtml(eq, weight, reps, dist, time) {
   if (eq === 'cardio') {
     return `<div class="form-row">
       <label>Default Distance (m)</label>
       <input type="number" id="ex-dist" value="${dist||''}" inputmode="numeric" onfocus="this.select()" placeholder="1000"/>
+    </div>`;
+  }
+  if (eq === 'interval') {
+    return `<div class="form-row">
+      <label>Duration (seconds)</label>
+      <input type="number" id="ex-time" value="${time || 60}" inputmode="numeric" onfocus="this.select()" placeholder="60"/>
     </div>`;
   }
   return `<div class="form-row-2">
@@ -1593,7 +1634,7 @@ function exerciseFieldsHtml(eq, weight, reps, dist) {
 function exEqChange() {
   const eq = document.getElementById('ex-eq').value;
   const wrap = document.getElementById('ex-fields-wrap');
-  if (wrap) wrap.innerHTML = exerciseFieldsHtml(eq, '', '', '');
+  if (wrap) wrap.innerHTML = exerciseFieldsHtml(eq, '', '', '', '');
 }
 
 async function saveExercise(editId) {
@@ -1601,10 +1642,13 @@ async function saveExercise(editId) {
   if (!name) { toast('Please enter a name'); return; }
   const eq = document.getElementById('ex-eq').value;
   const notes = (document.getElementById('ex-notes').value || '').trim();
-  let weight = 0, reps = 0, dist = 0;
+  let weight = 0, reps = 0, dist = 0, defaultTime = 0;
   if (eq === 'cardio') {
     const d = document.getElementById('ex-dist');
     dist = d ? parseFloat(d.value) || 0 : 0;
+  } else if (eq === 'interval') {
+    const ti = document.getElementById('ex-time');
+    defaultTime = ti ? parseInt(ti.value) || 60 : 60;
   } else {
     const w = document.getElementById('ex-weight');
     const r = document.getElementById('ex-reps');
@@ -1615,11 +1659,11 @@ async function saveExercise(editId) {
   if (editId) {
     const ex = await DB.get('exercises', editId);
     if (!ex) return;
-    Object.assign(ex, { name, equipment: eq, defaultWeight: weight, defaultReps: reps, defaultDistance: dist, notes });
+    Object.assign(ex, { name, equipment: eq, defaultWeight: weight, defaultReps: reps, defaultDistance: dist, defaultTime, notes });
     await DB.put('exercises', ex);
     toast('Exercise updated');
   } else {
-    const ex = { id: uid(), name, equipment: eq, defaultWeight: weight, defaultReps: reps, defaultDistance: dist, notes, isPrebuilt: false, isComplex: false, useCount: 0 };
+    const ex = { id: uid(), name, equipment: eq, defaultWeight: weight, defaultReps: reps, defaultDistance: dist, defaultTime, notes, isPrebuilt: false, isComplex: false, useCount: 0 };
     await DB.put('exercises', ex);
     toast('Exercise added');
   }
@@ -1829,9 +1873,27 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
       </div>`;
     }
   } else if (st.type === 'exercise') {
-    typeLabel = `<span style="color:var(--text3);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">EXERCISE</span>`;
+    const stExercise = ex;
+    const isIntervalSt = stExercise && stExercise.equipment === 'interval';
+    if (isIntervalSt) {
+      typeLabel = `<span style="color:#64A0FF;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">INTERVAL</span>`;
+    } else {
+      typeLabel = `<span style="color:var(--text3);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">EXERCISE</span>`;
+    }
     const unit = st.unit || 'reps';
-    if (isExpanded) {
+    if (isIntervalSt && isExpanded) {
+      specHtml = `
+      <div class="form-row" style="margin-top:10px;">
+        <label>Duration (seconds)</label>
+        <input type="number" value="${st.time || 60}" inputmode="numeric" onfocus="this.select()"
+          onchange="updateStation(${idx},'time',parseInt(this.value)||60)" placeholder="60"/>
+      </div>
+      <div class="form-row">
+        <label>Notes (optional)</label>
+        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+          onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/>
+      </div>`;
+    } else if (isExpanded) {
       specHtml = `
       <div class="form-row">
         <label>Unit</label>
@@ -1964,6 +2026,7 @@ function openAddStationSheet() {
     <button class="btn-orange btn-full" onclick="openStationPickerSheet('cardio')">Cardio</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('exercise')">Exercise</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('complex')">Complex</button>
+    <button class="btn btn-ghost btn-full" onclick="openStationPickerSheet('interval')" style="color:#64A0FF;border-color:rgba(100,160,255,0.4);">&#x23F1; Interval / Rest</button>
   </div>`);
 }
 
@@ -1971,6 +2034,31 @@ async function openStationPickerSheet(type) {
   _pickerType = type;
   _pickerFilter = 'all';
   _pickerSearch = '';
+
+  if (type === 'interval') {
+    let exercises = await DB.all('exercises');
+    exercises = exercises.filter(e => e.equipment === 'interval');
+    exercises.sort((a, b) => {
+      if (a.isPrebuilt && !b.isPrebuilt) return -1;
+      if (!a.isPrebuilt && b.isPrebuilt) return 1;
+      return (a.name||'').localeCompare(b.name||'');
+    });
+
+    const listHtml = exercises.map(ex => `
+      <div class="list-item" onclick="addStationFromPicker('${esc(ex.id)}','interval')" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">${esc(ex.name)}</div>
+          <div style="font-size:12px;color:#64A0FF;margin-top:2px;">${fmtMM((ex.defaultTime || 60))} default</div>
+        </div>
+        <span style="color:var(--neon);font-size:20px;">+</span>
+      </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text3);">No intervals found</div>`;
+
+    showSheet(`
+    <div style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Interval</div>
+    <div>${listHtml}</div>
+    <button class="btn btn-ghost btn-full" onclick="hideSheet()" style="margin-top:12px;">Done</button>`);
+    return;
+  }
 
   if (type === 'cardio') {
     let exercises = await DB.all('exercises');
@@ -2021,7 +2109,7 @@ async function openStationPickerSheet(type) {
 
 async function renderExercisePickerSheet() {
   let exercises = await DB.all('exercises');
-  exercises = exercises.filter(e => e.equipment !== 'cardio');
+  exercises = exercises.filter(e => e.equipment !== 'cardio' && e.equipment !== 'interval');
 
   if (_pickerFilter !== 'all') {
     exercises = exercises.filter(e => e.equipment === _pickerFilter);
@@ -2050,31 +2138,47 @@ async function renderExercisePickerSheet() {
       onclick="_pickerFilter='${p.key}';renderExercisePickerSheet()">${p.label}</div>`
   ).join('');
 
-  const listHtml = exercises.length > 0 ? exercises.map(ex => `
-    <div class="list-item" onclick="addStationFromPicker('${esc(ex.id)}','exercise')" style="cursor:pointer;">
-      <div style="flex:1;">
-        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">${esc(ex.name)}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px;">${eqLabel(ex.equipment)}${(ex.useCount||0)>0?' \u00B7 '+ex.useCount+'\u00D7':''}</div>
-      </div>
-      <span style="color:var(--neon);font-size:20px;">+</span>
-    </div>`).join('')
-  : `<div style="text-align:center;padding:24px;color:var(--text3);">No exercises found</div>`;
+  const listHtml = exercises.length > 0
+    ? exercises.map(ex => `
+      <div class="list-item" onclick="addStationFromPicker('${esc(ex.id)}','exercise')" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;">${esc(ex.name)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${eqLabel(ex.equipment)}${(ex.useCount||0)>0?' · '+ex.useCount+'×':''}</div>
+        </div>
+        <span style="color:var(--neon);font-size:20px;">+</span>
+      </div>`).join('')
+    : `<div style="text-align:center;padding:24px;color:var(--text3);">No exercises found</div>`;
 
+  // If sheet is already open, only update list and pills — keep input focused
+  const existingList = document.getElementById('picker-list');
+  const existingPills = document.getElementById('picker-pills');
+  if (existingList) {
+    existingList.innerHTML = listHtml;
+    if (existingPills) existingPills.innerHTML = filterPills;
+    return;
+  }
+
+  // First render — build full sheet
   showSheet(`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Exercise</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Exercises</div>
     <button class="btn btn-neon btn-sm" onclick="hideSheet()">Done</button>
   </div>
-  <input type="text" placeholder="Search exercises..." value="${esc(_pickerSearch)}"
-    style="margin-bottom:10px;width:100%;"
+  <input type="text" id="picker-search" placeholder="Search exercises..." value="${esc(_pickerSearch)}"
+    style="margin-bottom:10px;width:100%;box-sizing:border-box;"
     oninput="_pickerSearch=this.value;renderExercisePickerSheet()"
     onfocus="this.select()"/>
-  <div class="pill-row" style="margin-bottom:10px;overflow-x:auto;white-space:nowrap;">${filterPills}</div>
+  <div id="picker-pills" class="pill-row" style="margin-bottom:10px;">${filterPills}</div>
   <div id="picker-list">${listHtml}</div>`);
+
+  setTimeout(() => {
+    const input = document.getElementById('picker-search');
+    if (input) input.focus();
+  }, 350);
 }
 
 async function addStationFromPicker(id, type) {
-  if (type !== 'complex') {
+  if (type !== 'complex' && type !== 'interval') {
     const ex = await DB.get('exercises', id);
     if (ex) {
       ex.useCount = (ex.useCount || 0) + 1;
@@ -2096,6 +2200,15 @@ async function addStationFromPicker(id, type) {
     };
   } else if (type === 'complex') {
     newStation = { id: uid(), type: 'complex', complexId: id, reps: 1, notes: '', _expanded: false };
+  } else if (type === 'interval') {
+    const ex = await DB.get('exercises', id);
+    newStation = {
+      id: uid(), type: 'exercise', exerciseId: id,
+      weight: 0, reps: 0, distance: 0,
+      time: ex ? (ex.defaultTime || 60) : 60,
+      unit: 'seconds', notes: '', _expanded: false
+    };
+    hideSheet();
   }
 
   if (newStation) {
@@ -2328,6 +2441,8 @@ async function beginCountdown(wod) {
   t.stations = wod.stations || [];
   t.exercises = exercises;
   t.complexes = complexes;
+  t.intervalEndMs = 0;
+  t.intervalRemaining = 0;
 
   if (t.stations.length === 0) { toast('No stations in this WOD'); return; }
 
@@ -2359,10 +2474,18 @@ async function beginCountdown(wod) {
       // GO!
       numEl.textContent = 'GO!';
       beep(880, 0.4, 0.8);
-      speak(getStationName(firstStation, exercises, complexes));
+      if (isIntervalStation(firstStation, exercises)) {
+        speak(`${getStationName(firstStation, exercises, complexes)} — ${fmtMM(getIntervalDuration(firstStation) / 1000)}`);
+      } else {
+        speak(getStationName(firstStation, exercises, complexes));
+      }
       setTimeout(() => {
         overlay.classList.remove('active');
         startTimer();
+        // Set up interval countdown if first station is an interval
+        if (isIntervalStation(t.stations[0], t.exercises)) {
+          t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[0]);
+        }
       }, 800);
       return;
     }
@@ -2391,12 +2514,23 @@ function timerTick() {
   const t = S.timer;
   if (!t.active || t.paused) return;
   const nowMs = performance.now();
-  const elapsedMs = nowMs - t.startMs - t.totalPausedMs;
   const stationMs = t.stationActiveMs + (nowMs - t.stationSegmentStartMs);
   const el = document.getElementById('timer-display');
-  const st = document.getElementById('station-display');
-  if (el) el.textContent = fmtMM(stationMs / 1000);   // BIG = STATION
-  if (st) st.textContent = fmtMM(elapsedMs / 1000);   // SMALL = TOTAL
+  const st_el = document.getElementById('station-display');
+  if (el) el.textContent = fmtMM(stationMs / 1000);
+  if (st_el) st_el.textContent = fmtMM((nowMs - t.startMs) / 1000);
+
+  // Interval countdown
+  if (t.intervalEndMs > 0) {
+    const remaining = t.intervalEndMs - nowMs;
+    const cdEl = document.getElementById('interval-countdown');
+    if (cdEl) cdEl.textContent = fmtMM(Math.max(0, remaining) / 1000);
+    if (remaining <= 0) {
+      pressLap();
+      return;
+    }
+  }
+
   t.rafId = requestAnimationFrame(timerTick);
 }
 
@@ -2404,8 +2538,16 @@ function pauseTick() {
   const t = S.timer;
   if (!t.paused) return;
   const pauseMs = performance.now() - t.pauseStartMs;
-  const el = document.getElementById('pause-counter');
-  if (el) el.textContent = fmtMM(pauseMs / 1000);
+  const pauseEl = document.getElementById('pause-counter');
+  if (pauseEl) pauseEl.textContent = fmtMM(pauseMs / 1000);
+
+  // Total time (wall-clock) keeps ticking during pause
+  const totalEl = document.getElementById('station-display');
+  if (totalEl) {
+    const wallMs = performance.now() - t.startMs;
+    totalEl.textContent = fmtMM(wallMs / 1000);
+  }
+
   t.pauseRafId = requestAnimationFrame(pauseTick);
 }
 
@@ -2416,6 +2558,13 @@ function pauseTimer() {
   const segMs = nowMs - t.stationSegmentStartMs;
   t.stationSegments.push({ durationMs: segMs, startOffset: t.stationSegmentStartOffset });
   t.stationActiveMs += segMs;
+
+  // Freeze interval countdown
+  if (t.intervalEndMs > 0) {
+    t.intervalRemaining = Math.max(0, t.intervalEndMs - nowMs);
+    t.intervalEndMs = 0;
+  }
+
   t.paused = true;
   t.pauseStartMs = performance.now();
   cancelAnimationFrame(t.rafId);
@@ -2436,6 +2585,13 @@ function resumeTimer() {
   t.paused = false;
   t.stationSegmentStartMs = performance.now();
   t.stationSegmentStartOffset = performance.now() - t.startMs;
+
+  // Restore interval countdown from frozen remaining time
+  if (t.intervalRemaining > 0) {
+    t.intervalEndMs = performance.now() + t.intervalRemaining;
+    t.intervalRemaining = 0;
+  }
+
   cancelAnimationFrame(t.pauseRafId);
   reqWakeLock();
   document.getElementById('pause-overlay').style.display = 'none';
@@ -2491,7 +2647,23 @@ function pressLap() {
     t.stationIdx++;
     t.stationSegmentStartMs = performance.now();
     t.stationSegmentStartOffset = performance.now() - t.startMs;
-    speak(getStationName(t.stations[t.stationIdx], t.exercises, t.complexes));
+
+    t.intervalEndMs = 0;
+    t.intervalRemaining = 0;
+
+    // Set countdown if next station is an interval
+    if (isIntervalStation(t.stations[t.stationIdx], t.exercises)) {
+      t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[t.stationIdx]);
+    }
+
+    // Special voice for intervals
+    const nextSt = t.stations[t.stationIdx];
+    if (isIntervalStation(nextSt, t.exercises)) {
+      speak(`${getStationName(nextSt, t.exercises, t.complexes)} — ${fmtMM(getIntervalDuration(nextSt) / 1000)}`);
+    } else {
+      speak(getStationName(nextSt, t.exercises, t.complexes));
+    }
+
     renderTimerScreen();
     t.rafId = requestAnimationFrame(timerTick);
   }
@@ -2513,6 +2685,12 @@ function undoLap() {
   t.canUndo = false;
   t.undoBackup = null;
   t.active = true;
+  t.intervalEndMs = 0;
+  t.intervalRemaining = 0;
+  // Restart interval countdown if we're back on an interval station
+  if (isIntervalStation(t.stations[t.stationIdx], t.exercises)) {
+    t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[t.stationIdx]);
+  }
   renderTimerScreen();
   t.rafId = requestAnimationFrame(timerTick);
   toast('Lap undone');
@@ -2549,6 +2727,12 @@ function cancelLastLap() {
   t.canUndo = false;
   t.undoBackup = null;
   t.active = true;
+  t.intervalEndMs = 0;
+  t.intervalRemaining = 0;
+  // Restart interval countdown if we're back on an interval station
+  if (isIntervalStation(t.stations[t.stationIdx], t.exercises)) {
+    t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[t.stationIdx]);
+  }
   renderTimerScreen();
   t.rafId = requestAnimationFrame(timerTick);
 }
@@ -2639,6 +2823,7 @@ function renderTimerScreen() {
   const ex = st.exerciseId ? exercises.find(e => e.id === st.exerciseId) : null;
   const cx = st.complexId ? complexes.find(c => c.id === st.complexId) : null;
   const spec = stationSpecLine(st, exercises, complexes);
+  const currentIsInterval = isIntervalStation(st, exercises);
 
   // Complex movements
   let complexHtml = '';
@@ -2686,13 +2871,27 @@ function renderTimerScreen() {
   const stationMs = t.active && !t.paused
     ? t.stationActiveMs + (nowMs - t.stationSegmentStartMs)
     : t.stationActiveMs;
+  const wallMs = t.active ? (nowMs - t.startMs) : 0;
 
-  let timerInnerHtml = `
+  let timerInnerHtml;
+  if (currentIsInterval) {
+    const remainingMs = t.intervalEndMs > 0
+      ? Math.max(0, t.intervalEndMs - nowMs)
+      : getIntervalDuration(st);
+    timerInnerHtml = `
+    <div id="interval-countdown" style="font-family:'Fugaz One',cursive;font-size:88px;color:#64A0FF;line-height:1;display:block;letter-spacing:-2px;">${fmtMM(remainingMs / 1000)}</div>
+    <div class="timer-sublabel" style="color:#64A0FF;letter-spacing:2px;">TIME REMAINING</div>
+    <div class="timer-divider"></div>
+    <div id="station-display" style="font-family:'Fugaz One',cursive;font-size:32px;color:var(--text2);">${fmtMM(wallMs / 1000)}</div>
+    <div class="timer-sublabel">TOTAL TIME</div>`;
+  } else {
+    timerInnerHtml = `
     <div id="timer-display">${fmtMM(stationMs / 1000)}</div>
     <div class="timer-sublabel">STATION TIME</div>
     <div class="timer-divider"></div>
-    <div id="station-display" style="font-family:'Fugaz One',cursive;font-size:32px;color:var(--text2);">${fmtMM(elapsedMs / 1000)}</div>
+    <div id="station-display" style="font-family:'Fugaz One',cursive;font-size:32px;color:var(--text2);">${fmtMM(wallMs / 1000)}</div>
     <div class="timer-sublabel">TOTAL TIME</div>`;
+  }
 
   // Controls — always show undo/LAP/pause
   let controlsHtml = `
@@ -2736,7 +2935,7 @@ function renderTimerScreen() {
       <div class="timer-content" id="timer-left">
         <div class="now-card">
           <div class="now-label">Now</div>
-          <div class="now-name ${isCardio ? 'cardio' : ''}">${esc(stName.toUpperCase())}</div>
+          <div class="now-name ${isCardio ? 'cardio' : ''}" style="${currentIsInterval ? 'color:#64A0FF;' : ''}">${esc(stName.toUpperCase())}</div>
           ${spec ? `<div class="now-spec">${esc(spec)}</div>` : ''}
         </div>
         ${complexHtml}
@@ -2866,10 +3065,10 @@ async function renderSummary(sessionId) {
   </div>
 
   <div class="card" style="margin-bottom:16px;text-align:center;">
-    <div style="color:var(--text3);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Workout Time</div>
+    <div style="color:var(--text3);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Active Time</div>
     <div style="font-family:'Fugaz One',cursive;font-size:64px;color:var(--neon);line-height:1;">${fmtFull(totalExSecs)}</div>
     <div style="font-size:14px;color:var(--text2);margin-top:6px;">${esc(session.wodName || 'Workout')} &nbsp;·&nbsp; ${fmtDate(session.startedAt)}</div>
-    <div style="font-size:12px;color:var(--text3);margin-top:4px;">Wall-clock total: ${fmtFull(session.totalDuration || 0)}</div>
+    <div style="font-size:12px;color:var(--text3);margin-top:4px;">Total Time: ${fmtFull(session.totalDuration || 0)}</div>
   </div>
 
   <div class="section-title">Lap Breakdown</div>
@@ -2905,13 +3104,13 @@ async function copyMarkdown(sessionId) {
     }
   }
   const totalExSecs = laps.filter(l => l.type === 'exercise').reduce((s, l) => s + (l.duration || 0), 0);
-  md += `| Active | | ${fmtFull(totalExSecs)} |\n`;
-  md += `| **Wall-clock** | | **${fmtFull(session.totalDuration || totalExSecs)}** |\n`;
+  md += `| Active Time | | ${fmtFull(totalExSecs)} |\n`;
+  md += `| **Total Time** | | **${fmtFull(session.totalDuration || totalExSecs)}** |\n`;
 
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(md);
-      toast('Copied to clipboard!');
+      toast('Copied!');
       return;
     }
   } catch(e) {}
@@ -2919,16 +3118,17 @@ async function copyMarkdown(sessionId) {
   try {
     const ta = document.createElement('textarea');
     ta.value = md;
-    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
     document.body.appendChild(ta);
     ta.focus();
-    ta.setSelectionRange(0, 99999);
+    ta.setSelectionRange(0, ta.value.length);
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    if (ok) { toast('Copied to clipboard!'); return; }
+    if (ok) { toast('Copied!'); return; }
   } catch(e) {}
 
-  toast('Add to Home Screen to enable clipboard');
+  toast('Copy failed — use Export CSV instead');
 }
 
 async function exportCSV(sessionId) {
@@ -3111,7 +3311,7 @@ async function copyJournal(sessionId) {
   let md = `# ${session.wodName || 'Workout'} — Journal\n`;
   md += `**Date:** ${fmtDate(session.startedAt)}\n`;
   md += `**Active Time:** ${fmtFull(totalExSecs)}\n`;
-  md += `**Wall-clock:** ${fmtFull(session.totalDuration || totalExSecs)}\n\n`;
+  md += `**Total Time:** ${fmtFull(session.totalDuration || totalExSecs)}\n\n`;
   md += `## Session Log\n\n`;
   md += `| # | Station | Duration |\n|---|---------|----------|\n`;
   for (const l of laps) {
@@ -3128,7 +3328,7 @@ async function copyJournal(sessionId) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(md);
-      toast('Journal copied!');
+      toast('Copied!');
       return;
     }
   } catch(e) {}
@@ -3136,16 +3336,17 @@ async function copyJournal(sessionId) {
   try {
     const ta = document.createElement('textarea');
     ta.value = md;
-    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
     document.body.appendChild(ta);
     ta.focus();
-    ta.setSelectionRange(0, 99999);
+    ta.setSelectionRange(0, ta.value.length);
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    if (ok) { toast('Journal copied!'); return; }
+    if (ok) { toast('Copied!'); return; }
   } catch(e) {}
 
-  toast('Add to Home Screen to enable clipboard');
+  toast('Copy failed — use Export CSV instead');
 }
 
 // ============================================================
@@ -3232,7 +3433,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text3);font-size:14px;">STATION v2</div>
+      <div style="color:var(--text3);font-size:14px;">STATION v2.3</div>
     </div>
   </div>
 
