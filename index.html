@@ -1123,6 +1123,23 @@ function fmtSpeak(secs) {
   return `${secs} seconds`;
 }
 
+function speakify(text) {
+  return text
+    .replace(/\bKB\b/gi, 'kettlebell')
+    .replace(/\bKBs\b/gi, 'kettlebells')
+    .replace(/\bDB\b/gi, 'dumbbell')
+    .replace(/\bDBs\b/gi, 'dumbbells')
+    .replace(/\bBB\b/gi, 'barbell')
+    .replace(/\bRDL\b/gi, 'Romanian deadlift')
+    .replace(/\bOHP\b/gi, 'overhead press')
+    .replace(/\bSL\b/gi, 'single leg')
+    .replace(/\bAlt\b/gi, 'alternating')
+    .replace(/\bBW\b/gi, 'bodyweight')
+    .replace(/\bx(\d+)/gi, (_, n) => `${n} reps`)
+    .replace(/(\d+)x\b/gi, (_, n) => `${n} reps`)
+    .replace(/\bAMRAP\b/gi, 'as many reps as possible');
+}
+
 function applyTheme() {
   document.documentElement.style.setProperty('--bg-shell', '#0b0a08');
 }
@@ -1237,7 +1254,7 @@ function speak(text) {
 
 function speakStation(st, exercises, complexes) {
   if (S.settings.voiceMode === 'none') return;
-  const name = getStationName(st, exercises, complexes);
+  const name = speakify(getStationName(st, exercises, complexes));
 
   if (S.settings.voiceDetail === 'name' || !S.settings.voiceDetail) {
     if (isIntervalStation(st, exercises)) {
@@ -1258,7 +1275,7 @@ function speakStation(st, exercises, complexes) {
   const cx = complexes && complexes.find(c => c.id === st.complexId);
 
   if (st.type === 'complex' && cx) {
-    const chain = cx.movements.map(m => `${m.reps} ${m.name}`).join(', ');
+    const chain = cx.movements.map(m => `${m.reps} ${speakify(m.name)}`).join(', ');
     speak(`${name}. ${chain}`);
     return;
   }
@@ -1271,7 +1288,7 @@ function speakStation(st, exercises, complexes) {
 
   let parts = [name];
   if (st.unit === 'amrap' && st.time) {
-    parts.push(`AMRAP, ${fmtSpeak(st.time)}`);
+    parts.push(`as many reps as possible, ${fmtSpeak(st.time)}`);
   } else if (st.unit === 'reps') {
     if (st.weight) parts.push(`${st.weight} kilograms`);
     if (st.reps) parts.push(`${st.reps} reps`);
@@ -1282,7 +1299,7 @@ function speakStation(st, exercises, complexes) {
   } else if (st.unit === 'steps') {
     if (st.reps) parts.push(`${st.reps} steps`);
   }
-  if (st.notes) parts.push(st.notes);
+  if (st.notes) parts.push(speakify(st.notes));
   speak(parts.join(', '));
 }
 
@@ -1616,6 +1633,8 @@ let _pickerFilter = 'all';
 let _pickerSearch = '';
 let _pickerType = 'exercise';
 let _pickerAddCount = 0;
+let _cachedMarkdown = '';
+let _cachedJournal = '';
 
 function showSheet(html) {
   if (_sheetTimer) { clearTimeout(_sheetTimer); _sheetTimer = null; }
@@ -2125,7 +2144,6 @@ async function confirmDeleteComplex(id) {
 async function renderWodBuilder() {
   const exercises = await DB.all('exercises');
   const complexes = await DB.all('complexes');
-  const allTags = await DB.all('tags');
   const stations = S.wodBuilder.stations;
 
   let stationsHtml = '';
@@ -2133,20 +2151,11 @@ async function renderWodBuilder() {
     stationsHtml += await stationBuilderHtml(stations[i], i, exercises, complexes, stations.length);
   }
 
-  const selectedTags = S.wodBuilder.tags || [];
-  const tagPills = allTags.map(t =>
-    `<div class="pill ${selectedTags.includes(t.name) ? 'active' : ''}"
-      onclick="toggleWodTag('${esc(t.name)}')">${esc(t.name)}</div>`
-  ).join('');
-
   document.getElementById('screen-wod-builder').innerHTML = `
   <div class="nav-header">
     <div class="nav-back" onclick="wodBuilderBack()">← Back</div>
     <div class="nav-title">WOD Builder</div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn-ghost btn-sm" onclick="previewWod()" style="min-width:36px;width:36px;padding:0;" title="Preview">${icons.eye}</button>
-      <button class="btn-primary btn-sm" onclick="saveWod()">Save</button>
-    </div>
+    <button class="btn-ghost btn-sm" onclick="previewWod()" style="min-width:36px;width:36px;padding:0;" title="Preview">${icons.eye}</button>
   </div>
 
   <div class="form-row">
@@ -2154,23 +2163,15 @@ async function renderWodBuilder() {
     <input type="text" id="wod-name-input" value="${esc(S.wodBuilder.name || 'WOD · ' + todayStr())}" placeholder="e.g. Tuesday Grinder" onfocus="this.select()" oninput="S.wodBuilder.name=this.value"/>
   </div>
 
-  <div class="form-row">
-    <label>Tags</label>
-    <div class="pill-row">${tagPills}
-      <div class="pill" onclick="openAddTagModal()" style="color:var(--bronze);border-color:var(--bronze-dim);">+ Add</div>
-    </div>
-  </div>
-
-  <div style="display:flex;gap:8px;margin-bottom:14px;">
-    <button class="btn-ghost btn-sm" onclick="openExerciseBuilderFromWod()" style="font-size:12px;color:var(--text-mid);">+ New Exercise</button>
-    <button class="btn-ghost btn-sm" onclick="openComplexBuilderFromWod()" style="font-size:12px;color:var(--text-mid);">+ New Complex</button>
-  </div>
-
   <div id="station-list">${stationsHtml}</div>
 
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
     <button class="btn-ghost btn-full" onclick="openAddStationSheet()">+ Add Station</button>
-    ${stations.length > 0 ? `<button class="btn-primary btn-full" onclick="startWodFromBuilder()">${icons.play} Start Workout</button>` : ''}
+    ${stations.length > 0 ? `
+    <div style="display:flex;gap:10px;">
+      <button class="btn-ghost btn-full" onclick="openSaveModal()">Save</button>
+      <button class="btn-primary btn-full" onclick="openSaveModal(true)">${icons.play} Save & Start</button>
+    </div>` : ''}
   </div>`;
 }
 
@@ -2426,7 +2427,10 @@ async function openStationPickerSheet(type) {
     showSheet(`
     <div style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Cardio</div>
     <div>${listHtml}</div>
-    <button class="btn-ghost btn-full" onclick="hideSheet()" style="margin-top:12px;">Done</button>`);
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+      <button class="btn-ghost btn-full" onclick="hideSheet();openExerciseBuilderFromWod();" style="color:var(--text-mid);font-size:13px;">+ New Cardio Exercise</button>
+      <button class="btn-ghost btn-full" onclick="hideSheet()">Done</button>
+    </div>`);
     return;
   }
 
@@ -2447,7 +2451,10 @@ async function openStationPickerSheet(type) {
     showSheet(`
     <div style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Complex</div>
     <div>${listHtml}</div>
-    <button class="btn-ghost btn-full" onclick="hideSheet()" style="margin-top:12px;">Done</button>`);
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+      <button class="btn-ghost btn-full" onclick="hideSheet();openComplexBuilderFromWod();" style="color:var(--text-mid);font-size:13px;">+ New Complex</button>
+      <button class="btn-ghost btn-full" onclick="hideSheet()">Done</button>
+    </div>`);
     return;
   }
 
@@ -2507,7 +2514,7 @@ async function renderExercisePickerSheet() {
   showSheet(`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">
-      Select Exercises<span id="picker-count" style="color:var(--bronze);margin-left:8px;font-size:14px;"></span>
+      Select Exercises<span id="picker-count" style="color:var(--yellow);margin-left:8px;font-size:16px;font-family:'Barlow Condensed',sans-serif;font-weight:800;"></span>
     </div>
     <button class="btn-primary btn-sm" onclick="hideSheet()">Done</button>
   </div>
@@ -2516,7 +2523,8 @@ async function renderExercisePickerSheet() {
     oninput="_pickerSearch=this.value;renderExercisePickerSheet()"
     onfocus="this.select()"/>
   <div id="picker-pills" class="pill-row" style="margin-bottom:10px;">${filterPills}</div>
-  <div id="picker-list">${listHtml}</div>`);
+  <div id="picker-list">${listHtml}</div>
+  <button class="btn-ghost btn-full" onclick="hideSheet();openExerciseBuilderFromWod();" style="margin-top:12px;color:var(--text-mid);font-size:13px;">+ New Exercise</button>`);
 
   setTimeout(() => {
     const input = document.getElementById('picker-search');
@@ -2570,8 +2578,9 @@ async function addStationFromPicker(id, type) {
         const btn = row.querySelector('.picker-add-btn');
         if (btn) {
           btn.textContent = '✓';
-          btn.style.color = 'var(--bronze)';
-          setTimeout(() => { btn.textContent = '+'; btn.style.color = 'var(--yellow)'; }, 800);
+          btn.style.color = 'var(--yellow)';
+          btn.style.fontSize = '22px';
+          setTimeout(() => { btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '20px'; }, 2000);
         }
       });
       _pickerAddCount++;
@@ -2588,33 +2597,73 @@ async function addStationFromPicker(id, type) {
   }
 }
 
-async function saveWod() {
-  const name = (document.getElementById('wod-name-input')?.value || '').trim() || `WOD · ${todayStr()}`;
+async function openSaveModal(andStart = false) {
   if (S.wodBuilder.stations.length === 0) { toast('Add at least one station'); return; }
+  const allTags = await DB.all('tags');
+  const selected = S.wodBuilder.tags || [];
+  const pillsHtml = allTags.map(t =>
+    `<div class="pill ${selected.includes(t.name) ? 'active' : ''}" onclick="toggleSaveModalTag('${esc(t.name)}')" style="margin:3px;">${esc(t.name)}</div>`
+  ).join('');
+  const nameVal = (document.getElementById('wod-name-input')?.value || S.wodBuilder.name || '').trim() || `WOD · ${todayStr()}`;
+  showModal(`
+  <div style="margin-bottom:14px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">${andStart ? 'Save & Start' : 'Save WOD'}</div>
+  <div class="form-row">
+    <label>Name</label>
+    <input type="text" id="save-modal-name" value="${esc(nameVal)}" placeholder="e.g. Tuesday Grinder" onfocus="this.select()"/>
+  </div>
+  <div class="form-row">
+    <label>Tags</label>
+    <div id="save-modal-pills" class="pill-row" style="flex-wrap:wrap;">${pillsHtml}</div>
+    <button class="btn-ghost btn-sm" onclick="openAddTagModal()" style="margin-top:8px;color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ New Tag</button>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:16px;">
+    <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+    <button class="btn-primary btn-full" onclick="confirmSaveWod(${andStart})">${andStart ? icons.play + ' Start' : 'Save'}</button>
+  </div>`);
+}
 
+function toggleSaveModalTag(tagName) {
+  const tags = S.wodBuilder.tags || [];
+  const idx = tags.indexOf(tagName);
+  if (idx > -1) tags.splice(idx, 1);
+  else tags.push(tagName);
+  S.wodBuilder.tags = tags;
+  // Refresh pills in the save modal
+  DB.all('tags').then(allTags => {
+    const container = document.getElementById('save-modal-pills');
+    if (container) {
+      const sel = S.wodBuilder.tags || [];
+      container.innerHTML = allTags.map(t =>
+        `<div class="pill ${sel.includes(t.name) ? 'active' : ''}" onclick="toggleSaveModalTag('${esc(t.name)}')" style="margin:3px;">${esc(t.name)}</div>`
+      ).join('');
+    }
+  });
+}
+
+async function confirmSaveWod(andStart) {
+  const name = (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
   const allWods = await DB.all('wods');
   const duplicate = allWods.find(w =>
     w.name.toLowerCase().trim() === name.toLowerCase().trim() &&
     w.id !== S.wodBuilder.id
   );
-
   if (duplicate) {
     showModal(`
     <div style="text-align:center;padding:8px 0;">
       <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;margin-bottom:12px;">Name Already Exists</div>
       <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);margin-bottom:20px;font-size:14px;">"${esc(name)}" is already in your library.</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
-        <button class="btn-ghost btn-full" onclick="hideModal()">Rename</button>
-        <button class="btn-primary btn-full" onclick="hideModal();saveWodForce()">Save Anyway</button>
+        <button class="btn-ghost btn-full" onclick="hideModal();openSaveModal(${andStart})">Rename</button>
+        <button class="btn-primary btn-full" onclick="hideModal();saveWodForce(${andStart},'${esc(name)}')">Save Anyway</button>
       </div>
     </div>`);
     return;
   }
-  await saveWodForce();
+  await saveWodForce(andStart, name);
 }
 
-async function saveWodForce() {
-  const name = (document.getElementById('wod-name-input')?.value || '').trim() || `WOD · ${todayStr()}`;
+async function saveWodForce(andStart, nameOverride) {
+  const name = nameOverride || (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
   const cleanStations = S.wodBuilder.stations.map(s => { const { _expanded, ...clean } = s; return clean; });
   const wodData = {
     id: S.wodBuilder.id || uid(),
@@ -2628,18 +2677,18 @@ async function saveWodForce() {
   S.wodBuilder.id = wodData.id;
   S.wodBuilder.name = name;
   S.wodBuilder.isNew = false;
-  toast('WOD saved!');
+  hideModal();
+  if (andStart) {
+    const wod = await DB.get('wods', S.wodBuilder.id);
+    if (wod) beginCountdown(wod);
+  } else {
+    toast('WOD saved!');
+  }
 }
 
-async function startWodFromBuilder() {
-  const name = (document.getElementById('wod-name-input')?.value || S.wodBuilder.name || '').trim();
-  if (!name) { toast('Name your WOD first'); return; }
-  if (S.wodBuilder.stations.length === 0) { toast('Add at least one station'); return; }
-
-  await saveWod();
-  const wod = await DB.get('wods', S.wodBuilder.id);
-  if (wod) beginCountdown(wod);
-}
+// Legacy shims for any remaining references
+async function saveWod() { await openSaveModal(false); }
+async function startWodFromBuilder() { await openSaveModal(true); }
 
 function wodBuilderBack() {
   const hasUnsaved = S.wodBuilder.stations.length > 0 && S.wodBuilder.isNew;
@@ -2658,17 +2707,27 @@ function wodBuilderBack() {
   }
 }
 
-function previewWod() {
+async function previewWod() {
   const stations = S.wodBuilder.stations;
   if (stations.length === 0) { toast('No stations yet'); return; }
+  const exercises = await DB.all('exercises');
+  const complexes = await DB.all('complexes');
+  const wodName = (document.getElementById('wod-name-input')?.value || S.wodBuilder.name || '').trim() || 'Unnamed WOD';
   showModal(`
-  <div style="margin-bottom:16px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">${esc(S.wodBuilder.name || 'Unnamed WOD')}</div>
-  <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:13px;margin-bottom:12px;">${stations.length} stations</div>
-  ${stations.map((s,i) => `
+  <div style="margin-bottom:16px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">${esc(wodName)}</div>
+  <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:13px;margin-bottom:12px;">${stations.length} station${stations.length !== 1 ? 's' : ''}</div>
+  ${stations.map((s,i) => {
+    const name = getStationName(s, exercises, complexes);
+    const spec = stationSpecLine(s, exercises, complexes);
+    return `
     <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--rule);">
       <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:14px;color:var(--text-lo);min-width:20px;">${i+1}</span>
-      <span style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">${s.type.toUpperCase()}${s.notes ? ' · '+esc(s.notes) : ''}</span>
-    </div>`).join('')}
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);">${esc(name)}</div>
+        ${spec ? `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-mid);margin-top:1px;">${esc(spec)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('')}
   <button class="btn-ghost btn-full" onclick="hideModal()" style="margin-top:16px;">Close</button>`);
 }
 
@@ -2702,9 +2761,12 @@ async function renderWodLibrary() {
   let listHtml = '';
   for (const wod of filteredWods) {
     const stCount = wod.stations ? wod.stations.length : 0;
-    const tagPills = (wod.tags || []).map(t =>
+    const wodTagList = wod.tags || [];
+    const visibleTags = wodTagList.slice(0, 3);
+    const overflowCount = wodTagList.length - visibleTags.length;
+    const tagPills = visibleTags.map(t =>
       `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--bronze);padding:2px 6px;border:1px solid var(--bronze-dim);border-radius:2px;">${esc(t)}</span>`
-    ).join('');
+    ).join('') + (overflowCount > 0 ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;color:var(--text-lo);padding:2px 4px;">+${overflowCount}</span>` : '');
     const isExpanded = expandedId === wod.id;
     const prebuiltBadge = wod.isPrebuilt
       ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;color:var(--text-lo);text-transform:uppercase;letter-spacing:0.5px;">BUILT-IN</span>`
@@ -2722,7 +2784,7 @@ async function renderWodLibrary() {
     listHtml += `
     <div style="background:var(--bg-page);background-image:radial-gradient(circle,var(--bronze-ghost) 1px,transparent 1px);background-size:22px 22px;border:1px solid var(--rule);border-radius:var(--radius-card);margin-bottom:8px;overflow:hidden;cursor:pointer;"
       onclick="toggleLibraryExpand('${esc(wod.id)}')">
-      <div style="padding:14px 16px;display:flex;align-items:center;gap:12px;">
+      <div style="padding:10px 14px;display:flex;align-items:center;gap:12px;">
         <div style="flex:1;min-width:0;">
           <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);">${esc(wod.name)}</div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;">
@@ -2902,6 +2964,8 @@ async function beginCountdown(wod) {
     _countdownTimer = setTimeout(tick, 1000);
   }
 
+  const ctx = getACtx();
+  if (ctx.state === 'suspended') { await ctx.resume().catch(() => {}); }
   tick();
 }
 
@@ -3362,7 +3426,7 @@ function renderTimerScreen() {
         <div class="now-card station-enter">
           <div class="now-overline">${currentIsInterval ? 'INTERVAL' : isCardio ? 'CARDIO' : 'NOW'}</div>
           <div class="now-name" style="${nowNameColor}">${esc(stName.toUpperCase())}</div>
-          ${spec ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;color:var(--text-mid);margin-top:5px;letter-spacing:0.03em;text-transform:uppercase;">${esc(spec)}</div>` : ''}
+          ${spec ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;color:var(--text-mid);margin-top:5px;letter-spacing:0.03em;text-transform:uppercase;">${esc(spec)}</div>` : ''}
         </div>
         ${complexHtml}
         <div class="timer-display-card">
@@ -3481,6 +3545,22 @@ async function renderSummary(sessionId) {
     lapsHtml = `<div style="text-align:center;padding:20px;color:var(--text-lo);">No laps recorded.</div>`;
   }
 
+  // Cache markdown for synchronous copy (iOS clipboard fix)
+  let mdCache = `# ${session.wodName || 'Workout'}\n`;
+  mdCache += `**Date:** ${fmtDate(session.startedAt)}\n\n`;
+  mdCache += `| # | Station | Duration |\n|---|---------|----------|\n`;
+  for (const l of laps) {
+    if (l.type === 'pause') {
+      mdCache += `| — | Paused | ${fmtMM(l.duration || 0)} |\n`;
+    } else {
+      const name = ((l.label || '').split(' · ')[0]) + (l.continued ? ' cont.' : '');
+      mdCache += `| ${l.lapNumber || ''} | ${name} | ${fmtMM(l.duration || 0)} |\n`;
+    }
+  }
+  mdCache += `| Active Time | | ${fmtFull(totalExSecs)} |\n`;
+  mdCache += `| **Total Time** | | **${fmtFull(session.totalDuration || totalExSecs)}** |\n`;
+  _cachedMarkdown = mdCache;
+
   const pending = session.journalPending;
   const journalBtn = pending
     ? `<button class="btn-primary btn-full" onclick="nav('journal',{sessionId:'${esc(sessionId)}'})" style="margin-top:10px;">${icons.journal} Complete Journal</button>`
@@ -3513,7 +3593,7 @@ async function renderSummary(sessionId) {
   </div>
 
   <div style="display:flex;gap:10px;margin-bottom:10px;">
-    <button class="btn-ghost btn-full" onclick="copyMarkdown('${esc(sessionId)}')">Copy Markdown</button>
+    <button class="btn-ghost btn-full" onclick="copyMarkdown()">Copy Markdown</button>
     <button class="btn-ghost btn-full" onclick="exportCSV('${esc(sessionId)}')">Export CSV</button>
   </div>
   ${journalBtn}
@@ -3549,27 +3629,9 @@ async function copyToClipboard(text) {
   return false;
 }
 
-async function copyMarkdown(sessionId) {
-  const session = await DB.get('sessions', sessionId);
-  if (!session) return;
-  const laps = [...(session.laps || [])].sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
-
-  let md = `# ${session.wodName || 'Workout'}\n`;
-  md += `**Date:** ${fmtDate(session.startedAt)}\n\n`;
-  md += `| # | Station | Duration |\n|---|---------|----------|\n`;
-  for (const l of laps) {
-    if (l.type === 'pause') {
-      md += `| — | Paused | ${fmtMM(l.duration || 0)} |\n`;
-    } else {
-      const name = ((l.label || '').split(' · ')[0]) + (l.continued ? ' cont.' : '');
-      md += `| ${l.lapNumber || ''} | ${name} | ${fmtMM(l.duration || 0)} |\n`;
-    }
-  }
-  const totalExSecs = laps.filter(l => l.type === 'exercise').reduce((s, l) => s + (l.duration || 0), 0);
-  md += `| Active Time | | ${fmtFull(totalExSecs)} |\n`;
-  md += `| **Total Time** | | **${fmtFull(session.totalDuration || totalExSecs)}** |\n`;
-
-  const ok = await copyToClipboard(md);
+async function copyMarkdown() {
+  if (!_cachedMarkdown) { toast('Nothing to copy'); return; }
+  const ok = await copyToClipboard(_cachedMarkdown);
   if (ok) { toast('Copied!'); } else { toast('Copy failed — use Export CSV instead'); }
 }
 
@@ -3682,7 +3744,36 @@ async function renderJournal(sessionId) {
 
   const notesVal = esc(j.notes || '');
   const saveBtn = isCompleted ? '' : `<button class="btn-primary btn-full" onclick="saveJournal('${esc(sessionId)}')" style="margin-top:16px;">Save Journal</button>`;
-  const copyJournalBtn = `<button class="btn btn-ghost btn-full" onclick="copyJournal('${esc(sessionId)}')" style="margin-top:10px;">${icons.journal} Copy Journal</button>`;
+  const copyJournalBtn = `<button class="btn btn-ghost btn-full" onclick="copyJournal()" style="margin-top:10px;">${icons.journal} Copy Journal</button>`;
+
+  // Cache journal markdown for synchronous copy (iOS clipboard fix)
+  const sliderLines = [
+    `Energy Going In: ${j.energy || '—'}/10`,
+    `RPE: ${j.rpe || '—'}/10`,
+    `Breathing: ${j.breathing || '—'}/10`,
+    `Hydration: ${j.hydration || '—'}/10`,
+    `Soreness: ${j.soreness || '—'}/10`,
+    `Satisfaction: ${j.satisfaction || '—'}/10`
+  ].join('\n');
+  const jLaps = [...(session.laps || [])].sort((a,b) => (a.startTime||0)-(b.startTime||0));
+  const jTotalExSecs = jLaps.filter(l => l.type==='exercise').reduce((s,l) => s+(l.duration||0), 0);
+  let jMd = `# ${session.wodName || 'Workout'} — Journal\n`;
+  jMd += `**Date:** ${fmtDate(session.startedAt)}\n`;
+  jMd += `**Active Time:** ${fmtFull(jTotalExSecs)}\n`;
+  jMd += `**Total Time:** ${fmtFull(session.totalDuration || jTotalExSecs)}\n\n`;
+  jMd += `## Session Log\n\n`;
+  jMd += `| # | Station | Duration |\n|---|---------|----------|\n`;
+  for (const l of jLaps) {
+    if (l.type === 'pause') {
+      jMd += `| — | Paused | ${fmtMM(l.duration || 0)} |\n`;
+    } else {
+      const name = ((l.label || '').split(' · ')[0]) + (l.continued ? ' cont.' : '');
+      jMd += `| ${l.lapNumber || ''} | ${name} | ${fmtMM(l.duration || 0)} |\n`;
+    }
+  }
+  jMd += `\n## Journal\n\n${sliderLines}\n`;
+  if (j.notes) jMd += `\n**Notes:** ${j.notes}\n`;
+  _cachedJournal = jMd;
 
   document.getElementById('screen-journal').innerHTML = `
   <div class="nav-header">
@@ -3736,42 +3827,10 @@ async function saveJournal(sessionId) {
   await renderJournal(sessionId);
 }
 
-async function copyJournal(sessionId) {
-  const session = await DB.get('sessions', sessionId);
-  if (!session) return;
-  const j = session.journal || {};
-
-  const sliderLines = [
-    `Energy Going In: ${j.energy || '—'}/10`,
-    `RPE: ${j.rpe || '—'}/10`,
-    `Breathing: ${j.breathing || '—'}/10`,
-    `Hydration: ${j.hydration || '—'}/10`,
-    `Soreness: ${j.soreness || '—'}/10`,
-    `Satisfaction: ${j.satisfaction || '—'}/10`
-  ].join('\n');
-
-  const laps = [...(session.laps || [])].sort((a,b) => (a.startTime||0)-(b.startTime||0));
-  const totalExSecs = laps.filter(l => l.type==='exercise').reduce((s,l) => s+(l.duration||0), 0);
-
-  let md = `# ${session.wodName || 'Workout'} — Journal\n`;
-  md += `**Date:** ${fmtDate(session.startedAt)}\n`;
-  md += `**Active Time:** ${fmtFull(totalExSecs)}\n`;
-  md += `**Total Time:** ${fmtFull(session.totalDuration || totalExSecs)}\n\n`;
-  md += `## Session Log\n\n`;
-  md += `| # | Station | Duration |\n|---|---------|----------|\n`;
-  for (const l of laps) {
-    if (l.type === 'pause') {
-      md += `| — | Paused | ${fmtMM(l.duration || 0)} |\n`;
-    } else {
-      const name = ((l.label || '').split(' · ')[0]) + (l.continued ? ' cont.' : '');
-      md += `| ${l.lapNumber || ''} | ${name} | ${fmtMM(l.duration || 0)} |\n`;
-    }
-  }
-  md += `\n## Journal\n\n${sliderLines}\n`;
-  if (j.notes) md += `\n**Notes:** ${j.notes}\n`;
-
-  const ok = await copyToClipboard(md);
-  if (ok) { toast('Copied!'); } else { toast('Copy failed — use Export CSV instead'); }
+async function copyJournal() {
+  if (!_cachedJournal) { toast('Nothing to copy'); return; }
+  const ok = await copyToClipboard(_cachedJournal);
+  if (ok) { toast('Copied!'); } else { toast('Copy failed'); }
 }
 
 // ============================================================
@@ -3877,7 +3936,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.1</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.2</div>
     </div>
   </div>
 
@@ -3957,31 +4016,57 @@ function toggleWodTag(tagName) {
   if (idx > -1) tags.splice(idx, 1);
   else tags.push(tagName);
   S.wodBuilder.tags = tags;
-  renderWodBuilder();
+  // Refresh modal pills in-place if modal is open
+  const modalPills = document.getElementById('tag-modal-pills');
+  if (modalPills) {
+    renderTagModalPills(modalPills);
+  } else {
+    renderWodBuilder();
+  }
 }
 
-function openAddTagModal() {
+function renderTagModalPills(container) {
+  // Sync re-render of tag pills inside the open modal
+  DB.all('tags').then(allTags => {
+    const selected = S.wodBuilder.tags || [];
+    container.innerHTML = allTags.map(t =>
+      `<div class="pill ${selected.includes(t.name) ? 'active' : ''}" onclick="toggleWodTag('${esc(t.name)}')" style="margin:3px;">${esc(t.name)}</div>`
+    ).join('');
+  });
+}
+
+async function openAddTagModal() {
+  const allTags = await DB.all('tags');
+  const selected = S.wodBuilder.tags || [];
+  const pillsHtml = allTags.map(t =>
+    `<div class="pill ${selected.includes(t.name) ? 'active' : ''}" onclick="toggleWodTag('${esc(t.name)}')" style="margin:3px;">${esc(t.name)}</div>`
+  ).join('');
   showModal(`
-  <div style="margin-bottom:16px;">
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">New Tag</div>
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Tags</div>
+    <div style="font-size:13px;color:var(--text-mid);margin-top:4px;">Tap to select. Add new tags below.</div>
   </div>
-  <div class="form-row">
-    <label>Tag Name</label>
-    <input type="text" id="new-tag-name" placeholder="e.g. Garage" onfocus="this.select()"/>
+  <div id="tag-modal-pills" class="pill-row" style="margin-bottom:16px;flex-wrap:wrap;">${pillsHtml}</div>
+  <div class="form-row" style="margin-bottom:0;">
+    <label>New Tag</label>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="new-tag-name" placeholder="e.g. Garage" onfocus="this.select()" style="flex:1;"/>
+      <button class="btn-primary btn-sm" onclick="saveNewTagFromModal()" style="white-space:nowrap;">Add</button>
+    </div>
   </div>
-  <div style="display:flex;gap:10px;margin-top:16px;">
-    <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
-    <button class="btn-primary btn-full" onclick="saveNewTag()">Add Tag</button>
-  </div>`);
+  <button class="btn-ghost btn-full" onclick="hideModal();renderWodBuilder();" style="margin-top:16px;">Done</button>`);
 }
 
-async function saveNewTag() {
+async function saveNewTagFromModal() {
   const name = (document.getElementById('new-tag-name')?.value || '').trim();
   if (!name) { toast('Enter a tag name'); return; }
   await DB.put('tags', { id: uid(), name, isPrebuilt: false });
-  hideModal();
+  document.getElementById('new-tag-name').value = '';
   toggleWodTag(name);
 }
+
+// Keep legacy name for backward compat
+async function saveNewTag() { await saveNewTagFromModal(); }
 
 // -- Deep-link builders from WOD Builder --
 function openExerciseBuilderFromWod() {
@@ -4037,6 +4122,9 @@ async function insertRest(afterIdx, seconds) {
     notes: '',
     _expanded: false
   };
+  if (S.wodBuilder.stations[afterIdx]) {
+    S.wodBuilder.stations[afterIdx]._expanded = false;
+  }
   S.wodBuilder.stations.splice(afterIdx + 1, 0, restStation);
   await renderWodBuilder();
   toast(`${seconds}s rest added`);
@@ -4053,16 +4141,22 @@ async function exportWod(id) {
   const wod = await DB.get('wods', id);
   if (!wod) return;
   const allExercises = await DB.all('exercises');
+  const allComplexes = await DB.all('complexes');
   const usedExIds = [...new Set(wod.stations.map(s => s.exerciseId).filter(Boolean))];
+  const usedCxIds = [...new Set(wod.stations.map(s => s.complexId).filter(Boolean))];
   const usedExercises = allExercises.filter(e => usedExIds.includes(e.id));
+  const usedComplexes = allComplexes.filter(c => usedCxIds.includes(c.id));
   const exportData = {
-    version: '3.1',
+    version: '3.2',
     exportedAt: Date.now(),
     wod: { name: wod.name, tags: wod.tags || [], stations: wod.stations },
     exercises: usedExercises.map(e => ({
       id: e.id, name: e.name, equipment: e.equipment,
       defaultWeight: e.defaultWeight, defaultReps: e.defaultReps,
       defaultDistance: e.defaultDistance, defaultTime: e.defaultTime || 0, notes: e.notes || ''
+    })),
+    complexes: usedComplexes.map(c => ({
+      id: c.id, name: c.name, movements: c.movements, isPrebuilt: c.isPrebuilt || false
     }))
   };
   const json = JSON.stringify(exportData, null, 2);
@@ -4101,23 +4195,43 @@ function importWod() {
 
 async function processWodImport(data) {
   if (!data.wod || !data.wod.stations) { toast('Invalid WOD file'); return; }
+
+  // Restore exercises
   const existingExercises = await DB.all('exercises');
-  const existingByName = {};
-  for (const ex of existingExercises) { existingByName[ex.name.toLowerCase()] = ex; }
-  const idMap = {};
+  const existingExByName = {};
+  for (const ex of existingExercises) { existingExByName[ex.name.toLowerCase()] = ex; }
+  const exIdMap = {};
   for (const ex of (data.exercises || [])) {
-    const existing = existingByName[ex.name.toLowerCase()];
+    const existing = existingExByName[ex.name.toLowerCase()];
     if (existing) {
-      idMap[ex.id] = existing.id;
+      exIdMap[ex.id] = existing.id;
     } else {
       const newEx = { ...ex, id: uid(), isPrebuilt: false, useCount: 0 };
       await DB.put('exercises', newEx);
-      idMap[ex.id] = newEx.id;
+      exIdMap[ex.id] = newEx.id;
     }
   }
+
+  // Restore complexes
+  const existingComplexes = await DB.all('complexes');
+  const existingCxByName = {};
+  for (const cx of existingComplexes) { existingCxByName[cx.name.toLowerCase()] = cx; }
+  const cxIdMap = {};
+  for (const cx of (data.complexes || [])) {
+    const existing = existingCxByName[cx.name.toLowerCase()];
+    if (existing) {
+      cxIdMap[cx.id] = existing.id;
+    } else {
+      const newCx = { ...cx, id: uid(), isPrebuilt: false };
+      await DB.put('complexes', newCx);
+      cxIdMap[cx.id] = newCx.id;
+    }
+  }
+
   const stations = data.wod.stations.map(s => ({
     ...s, id: uid(),
-    exerciseId: s.exerciseId ? (idMap[s.exerciseId] || s.exerciseId) : null
+    exerciseId: s.exerciseId ? (exIdMap[s.exerciseId] || s.exerciseId) : null,
+    complexId: s.complexId ? (cxIdMap[s.complexId] || s.complexId) : null
   }));
   const newWod = {
     id: uid(), name: data.wod.name || 'Imported WOD',
