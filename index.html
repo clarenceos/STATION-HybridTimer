@@ -953,7 +953,11 @@ const S = {
     wakeLock: null, rafId: null, pauseRafId: null,
     sessionId: null, wod: null, stations: [], exercises: [], complexes: [],
     intervalEndMs: 0,
-    intervalRemaining: 0
+    intervalRemaining: 0,
+    lapLocked: false,
+    amrapHalfFired: false,
+    amrapTenFired: false,
+    amrapCountdownFired: 0
   },
   summaryId: null,
   journalId: null
@@ -1075,7 +1079,10 @@ function stationLabel(st, exercises, complexes) {
   }
   if (st.type === 'complex') {
     const cx = complexes && complexes.find(c => c.id === st.complexId);
-    return cx ? `${cx.name} \u00D7 ${st.reps || 1} rounds` : 'Complex';
+    if (!cx) return 'Complex';
+    const chain = (cx.movements || []).map(m => `${m.reps}\u00D7 ${m.name}`).join(' \u2192 ');
+    const rounds = st.reps && st.reps > 1 ? ` \u00B7 ${st.reps} rounds` : '';
+    return `${cx.name} \u00B7 ${chain}${rounds}`;
   }
   return 'Station';
 }
@@ -1107,7 +1114,9 @@ function stationSpecLine(st, exercises, complexes) {
     return parts.join(' \u00B7 ');
   }
   if (st.type === 'complex') {
-    return '';
+    const cx = complexes && complexes.find(c => c.id === st.complexId);
+    if (!cx) return '';
+    return (cx.movements || []).map(m => `${m.reps}\u00D7 ${m.name}`).join(' \u2192 ');
   }
   return '';
 }
@@ -1286,10 +1295,22 @@ function speakStation(st, exercises, complexes) {
     return;
   }
 
+  // AMRAP — dedicated full announcement
+  if (st.unit === 'amrap') {
+    if (S.settings.voiceDetail === 'full') {
+      let amrapParts = [name];
+      if (st.weight) amrapParts.push(`${st.weight} kilograms`);
+      amrapParts.push('as many reps as possible');
+      if (st.time) amrapParts.push(fmtSpeak(st.time));
+      speak(speakify(amrapParts.join(', ')));
+    } else {
+      speak(speakify(`${name}, as many reps as possible, ${fmtSpeak(st.time || 0)}`));
+    }
+    return;
+  }
+
   let parts = [name];
-  if (st.unit === 'amrap' && st.time) {
-    parts.push(`as many reps as possible, ${fmtSpeak(st.time)}`);
-  } else if (st.unit === 'reps') {
+  if (st.unit === 'reps') {
     if (st.weight) parts.push(`${st.weight} kilograms`);
     if (st.reps) parts.push(`${st.reps} reps`);
   } else if (st.unit === 'meters') {
@@ -1558,6 +1579,19 @@ async function seedData() {
   }
 }
 
+async function seedTagsIfEmpty() {
+  const existing = await DB.all('tags');
+  if (existing.length > 0) return;
+  const defaultTags = [
+    'Strength','Conditioning','Endurance','Hyrox','MetCon',
+    'AMRAP','Recovery','Push','Pull','Legs','Full Body',
+    'Cardio','Intervals','Intense','Light','Benchmark'
+  ];
+  for (const name of defaultTags) {
+    await DB.put('tags', { id: uid(), name, isPrebuilt: true });
+  }
+}
+
 // ============================================================
 // NAVIGATION + MODAL + SHEET + TOAST
 // ============================================================
@@ -1578,7 +1612,7 @@ async function nav(screen, params) {
   } else if (screen === 'wod-builder') {
     if (params.wod) {
       S.wodBuilder = {
-        stations: JSON.parse(JSON.stringify(params.wod.stations || [])),
+        stations: JSON.parse(JSON.stringify(params.wod.stations || [])).map(s => ({ ...s, _expanded: false })),
         name: params.wod.name || '',
         id: params.isNew ? null : params.wod.id,
         isNew: !!params.isNew,
@@ -2167,11 +2201,15 @@ async function renderWodBuilder() {
 
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
     <button class="btn-ghost btn-full" onclick="openAddStationSheet()">+ Add Station</button>
-    ${stations.length > 0 ? `
-    <div style="display:flex;gap:10px;">
-      <button class="btn-ghost btn-full" onclick="openSaveModal()">Save</button>
-      <button class="btn-primary btn-full" onclick="openSaveModal(true)">${icons.play} Save & Start</button>
-    </div>` : ''}
+    ${stations.length > 0 ? (() => {
+      const isSaved = !S.wodBuilder.isNew && !!S.wodBuilder.id;
+      return isSaved
+        ? `<button class="btn-primary btn-full" onclick="startSavedWod()">${icons.play} Start</button>`
+        : `<div style="display:flex;gap:10px;">
+           <button class="btn-ghost btn-full" onclick="openSaveModal()">Save</button>
+           <button class="btn-primary btn-full" onclick="openSaveModal(true)">${icons.play} Save &amp; Start</button>
+           </div>`;
+    })() : ''}
   </div>`;
 }
 
@@ -2641,23 +2679,15 @@ function toggleSaveModalTag(tagName) {
 }
 
 async function confirmSaveWod(andStart) {
-  const name = (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
-  const allWods = await DB.all('wods');
-  const duplicate = allWods.find(w =>
-    w.name.toLowerCase().trim() === name.toLowerCase().trim() &&
-    w.id !== S.wodBuilder.id
-  );
-  if (duplicate) {
-    showModal(`
-    <div style="text-align:center;padding:8px 0;">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;margin-bottom:12px;">Name Already Exists</div>
-      <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);margin-bottom:20px;font-size:14px;">"${esc(name)}" is already in your library.</div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <button class="btn-ghost btn-full" onclick="hideModal();openSaveModal(${andStart})">Rename</button>
-        <button class="btn-primary btn-full" onclick="hideModal();saveWodForce(${andStart},'${esc(name)}')">Save Anyway</button>
-      </div>
-    </div>`);
-    return;
+  let name = (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
+  // Auto-suffix duplicate names
+  const _allWods = await DB.all('wods');
+  const _isDupe = (n) => _allWods.some(w => w.name.toLowerCase() === n.toLowerCase() && w.id !== S.wodBuilder.id);
+  if (_isDupe(name)) {
+    let _counter = 1;
+    while (_isDupe(`${name} (${_counter})`)) _counter++;
+    name = `${name} (${_counter})`;
+    toast(`Saving as "${name}"`);
   }
   await saveWodForce(andStart, name);
 }
@@ -2689,6 +2719,11 @@ async function saveWodForce(andStart, nameOverride) {
 // Legacy shims for any remaining references
 async function saveWod() { await openSaveModal(false); }
 async function startWodFromBuilder() { await openSaveModal(true); }
+
+async function startSavedWod() {
+  const wod = await DB.get('wods', S.wodBuilder.id);
+  if (wod) beginCountdown(wod);
+}
 
 function wodBuilderBack() {
   const hasUnsaved = S.wodBuilder.stations.length > 0 && S.wodBuilder.isNew;
@@ -2777,6 +2812,7 @@ async function renderWodLibrary() {
         <button class="btn-ghost btn-sm flex1" onclick="event.stopPropagation();previewLibraryWod('${esc(wod.id)}')">Preview</button>
         <button class="btn-ghost btn-sm flex1" onclick="event.stopPropagation();editLibraryWod('${esc(wod.id)}','${wod.isPrebuilt}')">Edit${wod.isPrebuilt?' (Copy)':''}</button>
         <button class="btn-ghost btn-sm flex1" onclick="event.stopPropagation();exportWod('${esc(wod.id)}')">Export</button>
+        ${!wod.isPrebuilt ? `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();confirmDeleteWod('${esc(wod.id)}','${esc(wod.name)}')" style="min-width:36px;width:36px;padding:0;color:var(--error);border-color:var(--error-dim);">${icons.trash}</button>` : ''}
       </div>
       <button class="btn-primary btn-full" onclick="event.stopPropagation();startLibraryWod('${esc(wod.id)}')">${icons.play} Start</button>
     </div>` : '';
@@ -2819,7 +2855,11 @@ async function renderWodLibrary() {
     <div class="header-rule"></div>
   </div>
 
-  <div class="pill-row" style="margin-bottom:14px;">${tagFilterPills}</div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+    <button class="btn-ghost btn-sm" onclick="openTagFilterModal()" style="color:${activeFilters.length > 0 ? 'var(--yellow)' : 'var(--text-mid)'};border-color:${activeFilters.length > 0 ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">&#127991; Filter${activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}</button>
+    ${activeFilters.length > 0 ? `<button class="btn-ghost btn-sm" onclick="clearLibraryFilters()" style="font-size:12px;color:var(--text-lo);">Clear</button>` : ''}
+    <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-left:auto;">${filteredWods.length} WOD${filteredWods.length !== 1 ? 's' : ''}</span>
+  </div>
   <div>${listHtml}</div>`;
 }
 
@@ -2839,6 +2879,47 @@ function toggleLibraryFilter(tagName) {
 function clearLibraryFilters() {
   S.libraryTagFilters = [];
   renderWodLibrary();
+}
+
+async function openTagFilterModal() {
+  const allTags = await DB.all('tags');
+  const activeFilters = S.libraryTagFilters || [];
+
+  const tagPillsHtml = allTags.map(t =>
+    `<div class="pill ${activeFilters.includes(t.name) ? 'active' : ''}"
+      style="cursor:pointer;"
+      onclick="toggleLibraryFilterInModal('${esc(t.name)}')">${esc(t.name)}</div>`
+  ).join('');
+
+  showModal(`
+  <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Filter by Tag</div>
+    <button class="btn-ghost btn-sm" onclick="hideModal();renderWodLibrary()" style="min-width:36px;width:36px;padding:0;">✕</button>
+  </div>
+  <input type="text" id="tag-filter-search" placeholder="Search tags..." style="margin-bottom:12px;"
+    oninput="filterTagModalList(this.value)" onfocus="this.select()"/>
+  <div id="tag-filter-pills" class="pill-row" style="margin-bottom:20px;">${tagPillsHtml}</div>
+  <div style="display:flex;gap:10px;">
+    <button class="btn-ghost btn-full" onclick="S.libraryTagFilters=[];hideModal();renderWodLibrary()">Clear All</button>
+    <button class="btn-primary btn-full" onclick="hideModal();renderWodLibrary()">Done</button>
+  </div>`);
+}
+
+function toggleLibraryFilterInModal(tagName) {
+  if (!S.libraryTagFilters) S.libraryTagFilters = [];
+  const idx = S.libraryTagFilters.indexOf(tagName);
+  if (idx > -1) S.libraryTagFilters.splice(idx, 1);
+  else S.libraryTagFilters.push(tagName);
+  document.querySelectorAll('#tag-filter-pills .pill').forEach(p => {
+    p.classList.toggle('active', S.libraryTagFilters.includes(p.textContent.trim()));
+  });
+}
+
+function filterTagModalList(query) {
+  const q = (query || '').toLowerCase().trim();
+  document.querySelectorAll('#tag-filter-pills .pill').forEach(p => {
+    p.style.display = (!q || p.textContent.toLowerCase().includes(q)) ? '' : 'none';
+  });
 }
 
 async function previewLibraryWod(id) {
@@ -2888,12 +2969,41 @@ async function startLibraryWod(id) {
   beginCountdown(wod);
 }
 
+function confirmDeleteWod(id, name) {
+  showModal(`
+  <div style="text-align:center;padding:8px 0;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;margin-bottom:12px;color:var(--error);">Delete WOD?</div>
+    <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);margin-bottom:6px;font-size:15px;">"${esc(name)}"</div>
+    <div style="font-family:'DM Sans',sans-serif;color:var(--text-lo);margin-bottom:24px;font-size:13px;">Workout history is preserved. This cannot be undone.</div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+      <button class="btn-danger btn-full" onclick="deleteWod('${esc(id)}')">Delete</button>
+    </div>
+  </div>`);
+}
+
+async function deleteWod(id) {
+  await DB.del('wods', id);
+  if (S.libraryExpandedId === id) S.libraryExpandedId = null;
+  hideModal();
+  toast('WOD deleted');
+  await renderWodLibrary();
+}
+
 // ============================================================
 // TIMER CORE — COUNTDOWN, LAP, PAUSE, RESUME, UNDO, END
 // ============================================================
 let _countdownTimer = null;
 
 async function beginCountdown(wod) {
+  // Warm up speech synthesis in user gesture context before any awaits
+  if (window.speechSynthesis && S.settings.voiceMode !== 'none') {
+    try {
+      const warmup = new SpeechSynthesisUtterance('');
+      speechSynthesis.speak(warmup);
+    } catch(e) {}
+  }
+
   const exercises = await DB.all('exercises');
   const complexes = await DB.all('complexes');
 
@@ -2922,6 +3032,10 @@ async function beginCountdown(wod) {
   t.complexes = complexes;
   t.intervalEndMs = 0;
   t.intervalRemaining = 0;
+  t.lapLocked = false;
+  t.amrapHalfFired = false;
+  t.amrapTenFired = false;
+  t.amrapCountdownFired = 0;
 
   if (t.stations.length === 0) { toast('No stations in this WOD'); return; }
 
@@ -2997,6 +3111,30 @@ function timerTick() {
     const remaining = t.intervalEndMs - nowMs;
     const cdEl = document.getElementById('interval-countdown');
     if (cdEl) cdEl.textContent = fmtMM(Math.max(0, remaining) / 1000);
+
+    // AMRAP voice cues — only for AMRAP stations with duration > 30s
+    const _amrapSt = t.stations[t.stationIdx];
+    const _isAmrap = _amrapSt && _amrapSt.unit === 'amrap';
+    const _amrapDur = _isAmrap ? (_amrapSt.time || 0) : 0;
+
+    if (_isAmrap && _amrapDur > 30 && S.settings.voiceMode !== 'none') {
+      const _remSecs = Math.ceil(remaining / 1000);
+      const _elapsed = _amrapDur - (remaining / 1000);
+
+      if (!t.amrapHalfFired && _elapsed >= _amrapDur / 2) {
+        t.amrapHalfFired = true;
+        speak(speakify('Halfway there'));
+      }
+      if (!t.amrapTenFired && _remSecs <= 10 && _remSecs > 5) {
+        t.amrapTenFired = true;
+        speak(speakify('Last 10 seconds'));
+      }
+      if (_remSecs <= 5 && _remSecs >= 1 && t.amrapCountdownFired !== _remSecs) {
+        t.amrapCountdownFired = _remSecs;
+        speak(speakify(String(_remSecs)));
+      }
+    }
+
     if (remaining <= 0) {
       pressLap(true);
       return;
@@ -3040,6 +3178,7 @@ function pauseTimer() {
   cancelAnimationFrame(t.rafId);
   relWakeLock();
   document.getElementById('pause-overlay').style.display = 'flex';
+  if (S.settings.voiceMode !== 'none') speak(speakify('Training paused'));
   t.pauseRafId = requestAnimationFrame(pauseTick);
 }
 
@@ -3064,12 +3203,13 @@ function resumeTimer() {
   cancelAnimationFrame(t.pauseRafId);
   reqWakeLock();
   document.getElementById('pause-overlay').style.display = 'none';
+  if (S.settings.voiceMode !== 'none') speak(speakify('Training resumed'));
   t.rafId = requestAnimationFrame(timerTick);
 }
 
 function pressLap(autoLap = false) {
   const t = S.timer;
-  if (!t.active || t.paused) return;
+  if (!t.active || t.paused || t.lapLocked) return;
   const nowMs = performance.now();
   const finalSegMs = nowMs - t.stationSegmentStartMs;
   const totalStationMs = t.stationActiveMs + finalSegMs;
@@ -3114,6 +3254,8 @@ function pressLap(autoLap = false) {
 
   if (t.stationIdx >= t.stations.length - 1) {
     t.active = false;
+    t.lapLocked = true;
+    setTimeout(() => { t.lapLocked = false; }, 600);
     relWakeLock();
     showWorkoutCompleteModal();
   } else {
@@ -3123,6 +3265,9 @@ function pressLap(autoLap = false) {
 
     t.intervalEndMs = 0;
     t.intervalRemaining = 0;
+    t.amrapHalfFired = false;
+    t.amrapTenFired = false;
+    t.amrapCountdownFired = 0;
 
     if (isIntervalStation(t.stations[t.stationIdx], t.exercises)) {
       t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[t.stationIdx]);
@@ -3160,12 +3305,16 @@ function undoLap() {
   renderTimerScreen();
   t.rafId = requestAnimationFrame(timerTick);
   toast('Lap undone');
+  speakStation(t.stations[t.stationIdx], t.exercises, t.complexes);
 }
 
 function showWorkoutCompleteModal() {
   const t = S.timer;
   const nowMs = performance.now();
   const totalMs = nowMs - t.startMs - t.totalPausedMs;
+  if (S.settings.voiceMode !== 'none') {
+    speak(speakify(`All stations completed. Total time, ${fmtSpeak(totalMs / 1000)}`));
+  }
   showModal(`
   <div style="text-align:center;padding:8px 0;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:56px;color:var(--text-hi);margin-bottom:8px;letter-spacing:-2px;">${fmtFull(totalMs/1000)}</div>
@@ -3936,7 +4085,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.2</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.3</div>
     </div>
   </div>
 
@@ -4238,6 +4387,14 @@ async function processWodImport(data) {
     tags: data.wod.tags || [], isPrebuilt: false,
     createdAt: Date.now(), stations
   };
+  // Auto-suffix if name already exists
+  const _existingWods = await DB.all('wods');
+  const _isDupeImport = (n) => _existingWods.some(w => w.name.toLowerCase() === n.toLowerCase());
+  if (_isDupeImport(newWod.name)) {
+    let _importCounter = 1;
+    while (_isDupeImport(`${newWod.name} (${_importCounter})`)) _importCounter++;
+    newWod.name = `${newWod.name} (${_importCounter})`;
+  }
   await DB.put('wods', newWod);
   toast(`"${newWod.name}" imported!`);
   await renderWodLibrary();
@@ -4328,6 +4485,7 @@ async function init() {
     if (saved) Object.assign(S.settings, saved);
     applyTheme();
     await seedData();
+    await seedTagsIfEmpty();
     if (window.speechSynthesis) {
       voices = speechSynthesis.getVoices();
       if (!voices.length) {
