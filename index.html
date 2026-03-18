@@ -425,6 +425,7 @@ input[type="range"]::-moz-range-thumb {
 .eq-sandbag      { background: rgba(160,120,80,0.10); color: #a07850;          border: 1px solid rgba(160,120,80,0.25); }
 .eq-bodyweight   { background: transparent;           color: var(--text-lo);   border: 1px solid var(--rule); }
 .eq-interval     { background: var(--interval-dim);   color: var(--interval);  border: 1px solid rgba(100,160,255,0.3); }
+.eq-trx          { background: rgba(160,100,220,0.10);color: #a064dc;          border: 1px solid rgba(160,100,220,0.25); }
 .eq-complex      { background: rgba(184,118,42,0.08); color: var(--bronze-mid);border: 1px solid var(--bronze-dim); }
 
 /* TABS */
@@ -909,7 +910,7 @@ input[type="range"]::-moz-range-thumb {
 <!-- PAUSE OVERLAY -->
 <div id="pause-overlay">
   <div style="background:var(--bg-page);background-image:radial-gradient(circle,var(--bronze-ghost) 1px,transparent 1px);background-size:22px 22px;border:1px solid var(--rule);border-top:2px solid var(--bronze);border-radius:var(--radius-modal);padding:28px 24px;width:100%;max-width:340px;text-align:center;position:relative;">
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--bronze);margin-bottom:16px;">WORKOUT PAUSED</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--bronze);margin-bottom:16px;">TRAINING PAUSED</div>
     <div id="pause-counter" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:72px;color:var(--text-hi);line-height:0.9;letter-spacing:-2px;">00:00</div>
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--text-lo);margin-top:6px;margin-bottom:24px;">RESTING</div>
     <div style="display:flex;gap:12px;">
@@ -1030,7 +1031,7 @@ function uid() {
 }
 
 function eqLabel(eq) {
-  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight', interval:'Interval' };
+  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight', interval:'Interval', trx:'TRX' };
   return map[eq] || (eq || '').toUpperCase();
 }
 
@@ -1073,7 +1074,7 @@ function stationLabel(st, exercises, complexes) {
     } else if (st.unit === 'steps') {
       spec = `${st.reps || '?'} steps`;
     } else if (st.unit === 'amrap') {
-      spec = `AMRAP ${fmtMM(st.time || 0)}`;
+      spec = st.weight ? `${st.weight}kg \u00B7 AMRAP ${fmtMM(st.time || 0)}` : `AMRAP ${fmtMM(st.time || 0)}`;
     }
     return spec ? `${ex.name} \u00B7 ${spec}` : ex.name;
   }
@@ -1302,9 +1303,11 @@ function speakStation(st, exercises, complexes) {
       if (st.weight) amrapParts.push(`${st.weight} kilograms`);
       amrapParts.push('as many reps as possible');
       if (st.time) amrapParts.push(fmtSpeak(st.time));
+      if (st.notes) { const _nw = st.notes.trim().split(/\s+/).length; if (_nw <= 10) amrapParts.push(speakify(st.notes)); }
       speak(speakify(amrapParts.join(', ')));
     } else {
-      speak(speakify(`${name}, as many reps as possible, ${fmtSpeak(st.time || 0)}`));
+      const _wPart = st.weight ? `, ${st.weight} kilograms` : '';
+      speak(speakify(`${name}${_wPart}, as many reps as possible, ${fmtSpeak(st.time || 0)}`));
     }
     return;
   }
@@ -1320,7 +1323,7 @@ function speakStation(st, exercises, complexes) {
   } else if (st.unit === 'steps') {
     if (st.reps) parts.push(`${st.reps} steps`);
   }
-  if (st.notes) parts.push(speakify(st.notes));
+  if (st.notes) { const _nw = st.notes.trim().split(/\s+/).length; if (_nw <= 10) parts.push(speakify(st.notes)); }
   speak(parts.join(', '));
 }
 
@@ -1508,6 +1511,23 @@ async function seedData() {
     }
   }
 
+  const existingTrx = (await DB.all('exercises')).find(e => e.equipment === 'trx');
+  if (!existingTrx) {
+    const trxExercises = [
+      { id: uid(), name: 'TRX Row', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Push-Up', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Squat', equipment: 'trx', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Lunge', equipment: 'trx', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Plank', equipment: 'trx', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 30, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Bicep Curl', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Tricep Extension', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+      { id: uid(), name: 'TRX Mountain Climber', equipment: 'trx', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 30, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 }
+    ];
+    for (const ex of trxExercises) {
+      await DB.put('exercises', ex);
+    }
+  }
+
   const exMap = {};
   for (const ex of prebuiltExercises) exMap[ex.name] = ex.id;
 
@@ -1589,6 +1609,24 @@ async function seedTagsIfEmpty() {
   ];
   for (const name of defaultTags) {
     await DB.put('tags', { id: uid(), name, isPrebuilt: true });
+  }
+}
+
+async function seedTrxIfEmpty() {
+  const existing = (await DB.all('exercises')).find(e => e.equipment === 'trx');
+  if (existing) return;
+  const trxExercises = [
+    { id: uid(), name: 'TRX Row', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Push-Up', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Squat', equipment: 'trx', defaultWeight: 0, defaultReps: 15, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Lunge', equipment: 'trx', defaultWeight: 0, defaultReps: 10, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Plank', equipment: 'trx', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 30, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Bicep Curl', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Tricep Extension', equipment: 'trx', defaultWeight: 0, defaultReps: 12, defaultDistance: 0, defaultTime: 0, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 },
+    { id: uid(), name: 'TRX Mountain Climber', equipment: 'trx', defaultWeight: 0, defaultReps: 0, defaultDistance: 0, defaultTime: 30, notes: '', isPrebuilt: true, isComplex: false, useCount: 0 }
+  ];
+  for (const ex of trxExercises) {
+    await DB.put('exercises', ex);
   }
 }
 
@@ -1779,7 +1817,8 @@ async function renderExercises() {
     { key: 'barbell', label: 'Barbell' },
     { key: 'medicine_ball', label: 'Medicine Ball' },
     { key: 'sandbag', label: 'Sandbag' },
-    { key: 'bodyweight', label: 'Bodyweight' }
+    { key: 'bodyweight', label: 'Bodyweight' },
+    { key: 'trx', label: 'TRX' }
   ];
 
   let pillsHtml = pills.map(p =>
@@ -2230,11 +2269,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <input type="number" value="${st.distance || ''}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'distance',parseFloat(this.value)||0)" placeholder="1000"/>
       </div>
-      <div class="form-row">
-        <label>Notes (optional)</label>
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
-          onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/>
-      </div>
+      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>`;
@@ -2255,11 +2290,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <input type="number" value="${st.time || 60}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'time',parseInt(this.value)||60)" placeholder="60"/>
       </div>
-      <div class="form-row">
-        <label>Notes (optional)</label>
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
-          onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/>
-      </div>`;
+      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}`;
     } else if (isExpanded) {
       specHtml = `
       <div class="form-row">
@@ -2271,6 +2302,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           <button class="unit-btn ${unit==='steps'?'active':''}" onclick="updateStation(${idx},'unit','steps');renderWodBuilder()">Steps</button>
           <button class="unit-btn ${unit==='amrap'?'active':''}" onclick="updateStation(${idx},'unit','amrap');renderWodBuilder()">AMRAP</button>
         </div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:4px;min-height:14px;">${unit === 'meters' ? 'Distance in meters' : unit === 'seconds' ? 'Duration in seconds' : unit === 'steps' ? 'Step count, per leg or total' : unit === 'amrap' ? 'Set a time limit · auto-advances on completion' : ''}</div>
       </div>
       ${unit === 'reps' ? `
       <div class="form-row-2">
@@ -2295,22 +2327,25 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <input type="number" value="${st.reps||''}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'reps',parseInt(this.value)||0)" placeholder="50"/>
       </div>` : unit === 'amrap' ? `
-      <div class="form-row">
-        <label>Time Limit (seconds)</label>
-        <input type="number" value="${st.time||''}" inputmode="numeric" onfocus="this.select()"
-          onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="300"/>
-        <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:4px;">Auto-advances when time runs out. Press LAP to finish early.</div>
-      </div>` : `
+      <div class="form-row-2">
+        <div>
+          <label>Weight (kg)</label>
+          <input type="number" value="${st.weight||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'weight',parseFloat(this.value)||0)" placeholder="0"/>
+        </div>
+        <div>
+          <label>Time Limit (s)</label>
+          <input type="number" value="${st.time||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="300"/>
+        </div>
+      </div>
+      <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:-4px;margin-bottom:8px;">Auto-advances when time runs out. Press LAP to finish early.</div>` : `
       <div class="form-row">
         <label>Seconds</label>
         <input type="number" value="${st.time||''}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="60"/>
       </div>`}
-      <div class="form-row">
-        <label>Notes (optional)</label>
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
-          onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/>
-      </div>
+      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>`;
@@ -2326,11 +2361,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           onchange="updateStation(${idx},'reps',parseInt(this.value)||1)" placeholder="1"/>
       </div>
       ${chain ? `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-bottom:12px;line-height:1.5;">${esc(chain)}</div>` : ''}
-      <div class="form-row">
-        <label>Notes (optional)</label>
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
-          onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/>
-      </div>
+      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
       <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>`;
@@ -2373,6 +2404,13 @@ function toggleStation(idx) {
 function updateStation(idx, field, value) {
   if (S.wodBuilder.stations[idx]) {
     S.wodBuilder.stations[idx][field] = value;
+  }
+}
+
+function toggleStationNotes(idx) {
+  if (S.wodBuilder.stations[idx]) {
+    S.wodBuilder.stations[idx]._notesOpen = true;
+    renderWodBuilder();
   }
 }
 
@@ -2524,7 +2562,8 @@ async function renderExercisePickerSheet() {
     { key: 'barbell', label: 'Barbell' },
     { key: 'medicine_ball', label: 'Med Ball' },
     { key: 'sandbag', label: 'Sandbag' },
-    { key: 'bodyweight', label: 'Bodyweight' }
+    { key: 'bodyweight', label: 'Bodyweight' },
+    { key: 'trx', label: 'TRX' }
   ].map(p =>
     `<div class="pill ${_pickerFilter === p.key ? 'active' : ''}"
       onclick="_pickerFilter='${p.key}';renderExercisePickerSheet()">${p.label}</div>`
@@ -2618,7 +2657,15 @@ async function addStationFromPicker(id, type) {
           btn.textContent = '✓';
           btn.style.color = 'var(--yellow)';
           btn.style.fontSize = '22px';
-          setTimeout(() => { btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '20px'; }, 2000);
+          btn.style.transition = '';
+          setTimeout(() => {
+            btn.style.transition = 'opacity 0.3s';
+            btn.style.opacity = '0';
+            setTimeout(() => {
+              btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '20px';
+              btn.style.opacity = '1'; btn.style.transition = '';
+            }, 300);
+          }, 1500);
         }
       });
       _pickerAddCount++;
@@ -2680,21 +2727,28 @@ function toggleSaveModalTag(tagName) {
 
 async function confirmSaveWod(andStart) {
   let name = (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
-  // Auto-suffix duplicate names
   const _allWods = await DB.all('wods');
   const _isDupe = (n) => _allWods.some(w => w.name.toLowerCase() === n.toLowerCase() && w.id !== S.wodBuilder.id);
   if (_isDupe(name)) {
     let _counter = 1;
     while (_isDupe(`${name} (${_counter})`)) _counter++;
-    name = `${name} (${_counter})`;
-    toast(`Saving as "${name}"`);
+    const _suggestedName = `${name} (${_counter})`;
+    const _andStart = andStart;
+    showModal(`
+      <div style="text-align:center;padding:8px 0 4px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;margin-bottom:8px;">Name Already Exists</div>
+        <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:14px;margin-bottom:20px;">"${esc(name)}" is already in your library.</div>
+        <button class="btn-primary btn-full" style="margin-bottom:10px;" onclick="saveWodForce(${_andStart ? 'true' : 'false'}, ${JSON.stringify(_suggestedName)})">Save as "${esc(_suggestedName)}"</button>
+        <button class="btn-ghost btn-full" onclick="hideModal();setTimeout(()=>openSaveModal(${_andStart ? 'true' : 'false'}),120)">← Rename</button>
+      </div>`);
+    return;
   }
   await saveWodForce(andStart, name);
 }
 
 async function saveWodForce(andStart, nameOverride) {
   const name = nameOverride || (document.getElementById('save-modal-name')?.value || '').trim() || `WOD · ${todayStr()}`;
-  const cleanStations = S.wodBuilder.stations.map(s => { const { _expanded, ...clean } = s; return clean; });
+  const cleanStations = S.wodBuilder.stations.map(s => { const { _expanded, _notesOpen, ...clean } = s; return clean; });
   const wodData = {
     id: S.wodBuilder.id || uid(),
     name,
@@ -2713,6 +2767,7 @@ async function saveWodForce(andStart, nameOverride) {
     if (wod) beginCountdown(wod);
   } else {
     toast('WOD saved!');
+    await renderWodBuilder();
   }
 }
 
@@ -2998,10 +3053,7 @@ let _countdownTimer = null;
 async function beginCountdown(wod) {
   // Warm up speech synthesis in user gesture context before any awaits
   if (window.speechSynthesis && S.settings.voiceMode !== 'none') {
-    try {
-      const warmup = new SpeechSynthesisUtterance('');
-      speechSynthesis.speak(warmup);
-    } catch(e) {}
+    try { speak('Get ready'); } catch(e) {}
   }
 
   const exercises = await DB.all('exercises');
@@ -3118,14 +3170,14 @@ function timerTick() {
     const _amrapDur = _isAmrap ? (_amrapSt.time || 0) : 0;
 
     if (_isAmrap && _amrapDur > 30 && S.settings.voiceMode !== 'none') {
-      const _remSecs = Math.ceil(remaining / 1000);
+      const _remSecs = Math.round(remaining / 1000);
       const _elapsed = _amrapDur - (remaining / 1000);
 
-      if (!t.amrapHalfFired && _elapsed >= _amrapDur / 2) {
+      if (!t.amrapHalfFired && _elapsed >= _amrapDur / 2 - 1) {
         t.amrapHalfFired = true;
         speak(speakify('Halfway there'));
       }
-      if (!t.amrapTenFired && _remSecs <= 10 && _remSecs > 5) {
+      if (!t.amrapTenFired && _remSecs <= 11 && _remSecs > 6) {
         t.amrapTenFired = true;
         speak(speakify('Last 10 seconds'));
       }
@@ -3255,7 +3307,7 @@ function pressLap(autoLap = false) {
   if (t.stationIdx >= t.stations.length - 1) {
     t.active = false;
     t.lapLocked = true;
-    setTimeout(() => { t.lapLocked = false; }, 600);
+    setTimeout(() => { t.lapLocked = false; }, 1000);
     relWakeLock();
     showWorkoutCompleteModal();
   } else {
@@ -3312,8 +3364,9 @@ function showWorkoutCompleteModal() {
   const t = S.timer;
   const nowMs = performance.now();
   const totalMs = nowMs - t.startMs - t.totalPausedMs;
+  const wallClockMs = nowMs - t.startMs;
   if (S.settings.voiceMode !== 'none') {
-    speak(speakify(`All stations completed. Total time, ${fmtSpeak(totalMs / 1000)}`));
+    speak(speakify(`All stations completed. Total time, ${fmtSpeak(wallClockMs / 1000)}`));
   }
   showModal(`
   <div style="text-align:center;padding:8px 0;">
@@ -4085,7 +4138,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.3</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.4</div>
     </div>
   </div>
 
@@ -4486,6 +4539,7 @@ async function init() {
     applyTheme();
     await seedData();
     await seedTagsIfEmpty();
+    await seedTrxIfEmpty();
     if (window.speechSynthesis) {
       voices = speechSynthesis.getVoices();
       if (!voices.length) {
