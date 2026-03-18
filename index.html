@@ -1786,7 +1786,10 @@ async function renderHome() {
   <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
     <div style="flex-shrink:0;padding:max(16px,env(safe-area-inset-top)) 20px 0;">
       <div class="flex-between" style="margin-bottom:24px;">
-        <button class="btn-ghost btn-sm" onclick="nav('readme')" aria-label="How to use" style="min-width:44px;width:44px;padding:0;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;">?</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-ghost btn-sm" onclick="nav('readme')" aria-label="How to use" style="min-width:44px;width:44px;padding:0;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;">?</button>
+          <button class="btn-ghost btn-sm" onclick="showAboutModal()" aria-label="About" style="min-width:44px;width:44px;padding:0;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;">i</button>
+        </div>
         <button class="btn-ghost btn-sm" onclick="nav('settings')" aria-label="Settings" style="min-width:44px;width:44px;padding:0;">${icons.gear}</button>
       </div>
 
@@ -1805,8 +1808,36 @@ async function renderHome() {
     </div>
     <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px env(safe-area-inset-bottom,24px);">
       ${recentHtml}
+      <div style="text-align:center;padding:20px 0 8px;font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-xlo);">
+        If STATIONS has made your sessions better — <a href="https://ko-fi.com/clarenceos" target="_blank" style="color:var(--text-lo);text-decoration:none;">click here</a>
+      </div>
     </div>
   </div>`;
+}
+
+function showAboutModal() {
+  const version = 'v3.5.2';
+  showModal(`
+  <div style="text-align:center;padding:4px 0 8px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:32px;color:var(--text-hi);letter-spacing:0.05em;">STATIONS</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-top:2px;margin-bottom:20px;">Built for hybrid athletes. Tested in the garage.</div>
+
+    <div style="text-align:left;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text-mid);line-height:1.65;margin-bottom:20px;">
+      <p>I'm Clarence — hybrid athlete in training, garage gym builder, and the solo person behind STATIONS.</p>
+      <p style="margin-top:10px;">My ADHD brain makes it hard to run workouts from memory, so I built a tool that does it for me. I hope it helps you too.</p>
+      <p style="margin-top:10px;color:var(--text-lo);font-size:13px;">No subscriptions. No ads. Everything stays on your device. Your data is yours. I don't need it.</p>
+    </div>
+
+    <div style="border-top:1px solid var(--rule);padding-top:16px;margin-bottom:16px;">
+      <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);margin-bottom:12px;">If STATIONS has made your workouts better, you can buy me a protein shake:</div>
+      <a href="https://ko-fi.com/clarenceos" target="_blank" style="display:block;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;letter-spacing:0.1em;color:var(--bronze);text-decoration:none;margin-bottom:8px;">☕ Ko-fi — ko-fi.com/clarenceos</a>
+      <a href="https://github.com/clarenceos/STATION-HybridTimer" target="_blank" style="display:block;font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);text-decoration:none;">⌥ github.com/clarenceos/STATION-HybridTimer</a>
+    </div>
+
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-xlo);margin-bottom:16px;">STATIONS ${version}</div>
+
+    <button class="btn-ghost btn-full" onclick="hideModal()">Close</button>
+  </div>`);
 }
 
 // ============================================================
@@ -2258,9 +2289,9 @@ async function renderWodBuilder() {
   </div>
 
   ${isEmom ? `
-  <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">${S.wodBuilder.emomDuration}s per interval</div>
-    <button class="btn-ghost btn-sm" onclick="openEmomConfigModal()" style="font-size:12px;color:var(--bronze);border-color:var(--bronze-dim);">Edit</button>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 2px;margin-bottom:2px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-lo);">${S.wodBuilder.emomDuration}s per interval</div>
+    <button class="btn-ghost btn-sm" onclick="openEmomConfigModal()" style="font-size:11px;color:var(--bronze);border-color:var(--bronze-dim);padding:2px 8px;min-height:24px;height:24px;">Edit</button>
   </div>` : ''}
 
   <div id="station-list">${stationsHtml}</div>
@@ -2788,12 +2819,14 @@ async function addStationFromPicker(id, type) {
           btn.style.fontSize = '22px';
           btn.style.transition = '';
           setTimeout(() => {
-            btn.style.transition = 'opacity 0.6s';
-            btn.style.opacity = '0';
+            btn.style.transition = 'opacity 0.6s ease';
+            requestAnimationFrame(() => {
+              btn.style.opacity = '0';
+            });
             setTimeout(() => {
-              btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '20px';
+              btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '';
               btn.style.opacity = '1'; btn.style.transition = '';
-            }, 600);
+            }, 700);
           }, 800);
         }
       });
@@ -3864,10 +3897,9 @@ function renderTimerScreen() {
   if (isEmom) {
     const currentInterval = (t.currentRound - 1) * stations.length + idx + 1;
     const totalIntervals = t.totalRounds > 0 ? t.totalRounds * stations.length : null;
-    const intervalDisplay = totalIntervals
-      ? `STATION ${currentInterval} OF ${totalIntervals}`
-      : `STATION ${currentInterval}`;
-    dotsHtml = `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.1em;">${intervalDisplay}</div>`;
+    const intervalPart = totalIntervals ? `STATION ${currentInterval} OF ${totalIntervals}` : `STATION ${currentInterval}`;
+    const roundPart = t.totalRounds > 0 ? `ROUND ${t.currentRound} OF ${t.totalRounds}` : `ROUND ${t.currentRound}`;
+    dotsHtml = `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.08em;">${intervalPart}<span style="color:var(--text-lo);margin:0 8px;">·</span>${roundPart}</div>`;
   } else if (stations.length <= 16) {
     dotsHtml = `<div class="progress-dots">` +
       stations.map((s, i) =>
@@ -4021,7 +4053,6 @@ function renderTimerScreen() {
       </div>
 
       <div class="timer-content" id="timer-left">
-        ${isEmom ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:0.15em;color:var(--text-mid);margin-bottom:6px;padding-left:2px;">${t.totalRounds > 0 ? `ROUND ${t.currentRound} OF ${t.totalRounds}` : `ROUND ${t.currentRound}`}</div>` : ''}
         <div class="now-card station-enter">
           <div class="now-overline">${currentIsInterval ? 'INTERVAL' : isCardio ? 'ENDURANCE' : 'NOW'}</div>
           <div class="now-name" style="${nowNameColor}">${esc(stName.toUpperCase())}</div>
@@ -4570,7 +4601,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5.1</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5.2</div>
     </div>
   </div>
 
@@ -4952,32 +4983,50 @@ function renderReadme() {
     <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Station</strong> — one exercise in your WOD. Could be a run, a lift, a set of swings, or a rest block.</p>
     <p style="margin-top:8px;"><strong style="color:var(--text-hi);">LAP</strong> — press it when you finish a station. Timer resets and you move to the next one.</p>
 
-    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Running a Workout</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Workout Formats</div>
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
-    <p>1. Tap <strong style="color:var(--text-hi);">WOD Library</strong> to use a prebuilt workout — or <strong style="color:var(--text-hi);">WOD Builder</strong> to make your own.</p>
+    <p>When you tap <strong style="color:var(--text-hi);">+ New</strong> in the WOD Library, you choose a format first. Each format has its own timer behavior.</p>
+    <p style="margin-top:10px;"><strong style="color:var(--text-hi);">Standard</strong> — station-by-station. Build your WOD, press LAP to advance through each station at your own pace.</p>
+    <p style="margin-top:10px;"><strong style="color:var(--text-hi);">EMOM</strong> — Every Minute On the Minute. The clock runs the workout. Set an interval (60, 90, or 120 seconds) and a round count. Each station gets one interval. When time is up, it moves automatically. Use <strong style="color:var(--text-hi);">›</strong> to skip ahead, <strong style="color:var(--text-hi);">‹</strong> to go back. No LAP button.</p>
+
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Running a Standard Workout</div>
+    <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
+    <p>1. Tap <strong style="color:var(--text-hi);">WOD Library</strong> → <strong style="color:var(--text-hi);">+ New</strong> → <strong style="color:var(--text-hi);">Standard</strong> — or open an existing WOD.</p>
     <p style="margin-top:6px;">2. Press <strong style="color:var(--text-hi);">Start</strong>.</p>
     <p style="margin-top:6px;">3. Do the work.</p>
     <p style="margin-top:6px;">4. Press <strong style="color:var(--text-hi);">LAP</strong> when done with each station.</p>
     <p style="margin-top:6px;">5. Repeat until the final station.</p>
     <p style="margin-top:6px;">6. Save your session and complete your <strong style="color:var(--text-hi);">Journal</strong>.</p>
 
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Running an EMOM</div>
+    <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
+    <p>1. Tap <strong style="color:var(--text-hi);">+ New</strong> → <strong style="color:var(--text-hi);">EMOM</strong>.</p>
+    <p style="margin-top:6px;">2. Name your EMOM and set the interval duration (60 / 90 / 120s).</p>
+    <p style="margin-top:6px;">3. Add your stations — each station = one movement.</p>
+    <p style="margin-top:6px;">4. Set your round count using the <strong style="color:var(--text-hi);">[ − ] [ + ]</strong> control at the bottom.</p>
+    <p style="margin-top:6px;">5. Press <strong style="color:var(--text-hi);">Save & Start</strong>. The clock handles the rest.</p>
+    <p style="margin-top:6px;">The top bar shows your position: <strong style="color:var(--text-hi);">STATION 4 OF 15 · ROUND 2 OF 5</strong>.</p>
+    <p style="margin-top:6px;">Voice announces each movement at the top of every interval. 5-4-3-2-1 countdown before each minute ends.</p>
+
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Station Types</div>
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
     <p><strong style="color:var(--text-hi);">Exercise</strong> — any strength or skill movement. Set weight, reps, distance, steps, or time.</p>
-    <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Cardio</strong> — running, rowing, skiing, biking. Set your distance.</p>
+    <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Endurance</strong> — running, rowing, skiing, biking. Set your distance.</p>
     <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Complex</strong> — a chain of movements done back to back. e.g. 10× KB Swing → 5× KB Press.</p>
     <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Interval</strong> — a timed rest or transition block. Auto-advances when time runs out. Press LAP to skip early.</p>
-    <p style="margin-top:8px;"><strong style="color:var(--text-hi);">AMRAP</strong> — As Many Rounds As Possible. Set a time limit. Auto-advances when time is up.</p>
+    <p style="margin-top:8px;"><strong style="color:var(--text-hi);">AMRAP</strong> — As Many Reps As Possible. Set a time limit. Auto-advances when time is up.</p>
 
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Timer Explained</div>
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
     <p><strong style="color:var(--text-hi);">Station Time</strong> — how long you have been on the current station. Resets every LAP.</p>
     <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Total Time</strong> — wall-clock time from start to finish. Includes rest periods.</p>
+    <p style="margin-top:8px;"><strong style="color:var(--text-hi);">Interval / EMOM countdown</strong> — bronze number counting down to zero. Auto-advances at zero.</p>
 
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Pausing</div>
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
     <p>Press <strong style="color:var(--text-hi);">⏸</strong> to pause. A rest counter starts. Press <strong style="color:var(--text-hi);">Resume</strong> when ready.</p>
-    <p style="margin-top:8px;">Pressed LAP by accident — press <strong style="color:var(--text-hi);">↩</strong> immediately to undo it.</p>
+    <p style="margin-top:8px;">Pressed LAP by accident — press <strong style="color:var(--text-hi);">↩</strong> immediately to undo it. (Standard mode only.)</p>
+    <p style="margin-top:8px;">During the countdown — tap <strong style="color:var(--text-hi);">Start Now</strong> to skip it and go immediately.</p>
 
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">After Your Workout</div>
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
@@ -4989,8 +5038,9 @@ function renderReadme() {
     <div class="header-rule" style="margin-top:0;margin-bottom:14px;"></div>
     <p>Install to your Home Screen for the best experience — tap the share icon in Safari, then "Add to Home Screen."</p>
     <p style="margin-top:8px;">Voice announcements name the next station as you LAP — useful when your phone is on the floor.</p>
-    <p style="margin-top:8px;">Enable <strong style="color:var(--text-hi);">Full Readout</strong> in Settings to hear weight, reps, and distance at each station.</p>
+    <p style="margin-top:8px;">Enable <strong style="color:var(--text-hi);">Full Readout</strong> in Voice Settings to hear weight, reps, and distance at each station.</p>
     <p style="margin-top:8px;">Use the <strong style="color:var(--text-hi);">+ Rest</strong> button inside any station to quickly insert a rest block below it.</p>
+    <p style="margin-top:8px;">In EMOM mode, voice announces the next movement at the top of every round. You'll also hear a 5-4-3-2-1 countdown before each interval ends.</p>
     <p style="margin-top:8px;">To move a WOD to another device — use <strong style="color:var(--text-hi);">Export</strong> in the WOD Library and <strong style="color:var(--text-hi);">Import</strong> on the other device.</p>
 
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.05em;margin-top:28px;margin-bottom:8px;">Your Data</div>
