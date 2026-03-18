@@ -925,6 +925,7 @@ input[type="range"]::-moz-range-thumb {
   <div id="countdown-label">GET READY</div>
   <div id="countdown-num">3</div>
   <div id="countdown-station"></div>
+  <button onclick="startNow()" style="margin-top:24px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.3em;color:rgba(234,228,217,0.4);background:none;border:none;cursor:pointer;padding:8px 16px;">Start Now</button>
 </div>
 
 <script>
@@ -932,10 +933,11 @@ input[type="range"]::-moz-range-thumb {
 // STATE
 // ============================================================
 const S = {
-  settings: { darkMode: true, countdownDuration: 3, voiceMode: 'female', voiceDetail: 'name' },
+  settings: { darkMode: true, countdownDuration: 3, voiceMode: 'female', voiceDetail: 'name', voiceSpeed: 'normal', voiceSettingsOpen: false, countdownCustom: null },
   exFilter: 'all',
   exTab: 'exercises',
-  wodBuilder: { stations: [], name: '', id: null, isNew: true, tags: [] },
+  wodBuilder: { stations: [], name: '', id: null, isNew: true, tags: [], emomMode: false, emomDuration: 60, emomRounds: 0 },
+  libraryWodFilter: 'all',
   _returnToWod: false,
   libraryExpandedId: null,
   libraryTagFilters: [],
@@ -958,7 +960,13 @@ const S = {
     lapLocked: false,
     amrapHalfFired: false,
     amrapTenFired: false,
-    amrapCountdownFired: 0
+    amrapCountdownFired: 0,
+    emomMode: false,
+    emomDuration: 60,
+    currentRound: 1,
+    totalRounds: 0,
+    emomFiveFired: false,
+    emomCountFired: 0
   },
   summaryId: null,
   journalId: null
@@ -1031,7 +1039,7 @@ function uid() {
 }
 
 function eqLabel(eq) {
-  const map = { cardio:'Cardio', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight', interval:'Interval', trx:'TRX' };
+  const map = { cardio:'Endurance', kettlebell:'Kettlebell', dumbbell:'Dumbbell', barbell:'Barbell', medicine_ball:'Medicine Ball', sandbag:'Sandbag', bodyweight:'Bodyweight', interval:'Interval', trx:'TRX' };
   return map[eq] || (eq || '').toUpperCase();
 }
 
@@ -1256,7 +1264,7 @@ function speak(text) {
     if (!voices.length) voices = speechSynthesis.getVoices();
     const v = voices.find(vv => fNames.some(n => vv.name.toLowerCase().includes(n)));
     if (v) utt.voice = v;
-    utt.rate = 0.9;
+    utt.rate = S.settings.voiceSpeed === 'fast' ? 1.1 : 0.9;
     utt.pitch = 1.0;
     speechSynthesis.speak(utt);
   } catch(e) {}
@@ -1657,7 +1665,12 @@ async function nav(screen, params) {
         tags: params.wod.tags ? [...params.wod.tags] : []
       };
     } else if (params.fresh) {
-      S.wodBuilder = { stations: [], name: '', id: null, isNew: true, tags: [] };
+      S.wodBuilder = {
+        stations: [], name: '', id: null, isNew: true, tags: [],
+        emomMode: params.emom === true,
+        emomDuration: 60,
+        emomRounds: 0
+      };
     }
     await renderWodBuilder();
     showScreen('wod-builder');
@@ -2218,6 +2231,7 @@ async function renderWodBuilder() {
   const exercises = await DB.all('exercises');
   const complexes = await DB.all('complexes');
   const stations = S.wodBuilder.stations;
+  const isEmom = S.wodBuilder.emomMode === true;
 
   let stationsHtml = '';
   for (let i = 0; i < stations.length; i++) {
@@ -2227,21 +2241,36 @@ async function renderWodBuilder() {
   document.getElementById('screen-wod-builder').innerHTML = `
   <div class="nav-header">
     <div class="nav-back" onclick="wodBuilderBack()">← Back</div>
-    <div class="nav-title">WOD Builder</div>
+    <div class="nav-title">${isEmom ? 'EMOM Builder' : 'WOD Builder'}</div>
     <button class="btn-ghost btn-sm" onclick="previewWod()" style="min-width:36px;width:36px;padding:0;" title="Preview">${icons.eye}</button>
   </div>
 
   <div class="form-row">
     <label>WOD Name</label>
-    <input type="text" id="wod-name-input" value="${esc(S.wodBuilder.name || 'WOD · ' + todayStr())}" placeholder="e.g. Tuesday Grinder" onfocus="this.select()" oninput="S.wodBuilder.name=this.value"/>
+    <input type="text" id="wod-name-input" value="${esc(S.wodBuilder.name || (isEmom ? 'EMOM · ' : 'WOD · ') + todayStr())}" placeholder="${isEmom ? 'e.g. EMOM Burner' : 'e.g. Tuesday Grinder'}" onfocus="this.select()" oninput="S.wodBuilder.name=this.value"/>
   </div>
+
+  ${isEmom ? `
+  <div class="form-row">
+    <label>Interval Duration</label>
+    <div class="pill-row" style="margin-bottom:0;">
+      ${[60, 90, 120].map(d =>
+        `<button class="pill ${S.wodBuilder.emomDuration === d ? 'active' : ''}" onclick="S.wodBuilder.emomDuration=${d};renderWodBuilder()">${d}s</button>`
+      ).join('')}
+    </div>
+  </div>
+  <div class="form-row">
+    <label>Total Rounds</label>
+    <input type="number" id="emom-rounds-input" value="${S.wodBuilder.emomRounds || ''}" inputmode="numeric" onfocus="this.select()"
+      onchange="S.wodBuilder.emomRounds=parseInt(this.value)||0" placeholder="10"/>
+  </div>` : ''}
 
   <div id="station-list">${stationsHtml}</div>
 
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
     <button class="btn-ghost btn-full" onclick="openAddStationSheet()">+ Add Station</button>
     ${stations.length > 0 ? (() => {
-      const isSaved = !S.wodBuilder.isNew && !!S.wodBuilder.id;
+      const isSaved = S.wodBuilder.isNew === false && !!S.wodBuilder.id;
       return isSaved
         ? `<button class="btn-primary btn-full" onclick="startSavedWod()">${icons.play} Start</button>`
         : `<div style="display:flex;gap:10px;">
@@ -2261,7 +2290,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
   let specHtml = '';
 
   if (st.type === 'cardio') {
-    typeLabel = `<span style="color:var(--yellow);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">CARDIO</span>`;
+    typeLabel = `<span style="color:var(--yellow);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">ENDURANCE</span>`;
     if (isExpanded) {
       specHtml = `
       <div class="form-row">
@@ -2269,10 +2298,23 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <input type="number" value="${st.distance || ''}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'distance',parseFloat(this.value)||0)" placeholder="1000"/>
       </div>
-      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
-      </div>`;
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);display:flex;gap:8px;align-items:center;">
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})"
+          style="font-size:12px;color:${st.notes ? 'var(--yellow)' : 'var(--text-lo)'};border-color:${st.notes ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">
+          ${st.notes ? '● Workout Notes' : '+ Workout Notes'}
+        </button>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
+          style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
+      </div>
+      ${(st._notesOpen || st.notes) ? `
+      <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+          onchange="updateStation(${idx},'notes',this.value)"
+          placeholder="Add a note for this station..." style="flex:1;"/>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+          style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
+      </div>` : ''}
+      `;
     }
   } else if (st.type === 'exercise') {
     const stExercise = ex;
@@ -2290,7 +2332,21 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <input type="number" value="${st.time || 60}" inputmode="numeric" onfocus="this.select()"
           onchange="updateStation(${idx},'time',parseInt(this.value)||60)" placeholder="60"/>
       </div>
-      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}`;
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);display:flex;gap:8px;align-items:center;">
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})"
+          style="font-size:12px;color:${st.notes ? 'var(--yellow)' : 'var(--text-lo)'};border-color:${st.notes ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">
+          ${st.notes ? '● Workout Notes' : '+ Workout Notes'}
+        </button>
+      </div>
+      ${(st._notesOpen || st.notes) ? `
+      <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+          onchange="updateStation(${idx},'notes',this.value)"
+          placeholder="Add a note for this station..." style="flex:1;"/>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+          style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
+      </div>` : ''}
+      `;
     } else if (isExpanded) {
       specHtml = `
       <div class="form-row">
@@ -2302,7 +2358,12 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           <button class="unit-btn ${unit==='steps'?'active':''}" onclick="updateStation(${idx},'unit','steps');renderWodBuilder()">Steps</button>
           <button class="unit-btn ${unit==='amrap'?'active':''}" onclick="updateStation(${idx},'unit','amrap');renderWodBuilder()">AMRAP</button>
         </div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:4px;min-height:14px;">${unit === 'meters' ? 'Distance in meters' : unit === 'seconds' ? 'Duration in seconds' : unit === 'steps' ? 'Step count, per leg or total' : unit === 'amrap' ? 'Set a time limit · auto-advances on completion' : ''}</div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:4px;min-height:14px;">${
+          unit === 'meters' ? 'For turf or track work with measured distance markers.' :
+          unit === 'seconds' ? 'For holds and static work. Press LAP when you\'re done.' :
+          unit === 'steps' ? 'For carries in small spaces — count steps instead of meters.' :
+          unit === 'amrap' ? 'As many reps as possible. Auto-advances when time runs out.' : ''
+        }</div>
       </div>
       ${unit === 'reps' ? `
       <div class="form-row-2">
@@ -2317,15 +2378,29 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
             onchange="updateStation(${idx},'reps',parseInt(this.value)||0)" placeholder="10"/>
         </div>
       </div>` : unit === 'meters' ? `
-      <div class="form-row">
-        <label>Distance (m)</label>
-        <input type="number" value="${st.distance||''}" inputmode="numeric" onfocus="this.select()"
-          onchange="updateStation(${idx},'distance',parseFloat(this.value)||0)" placeholder="50"/>
+      <div class="form-row-2">
+        <div>
+          <label>Weight (kg)</label>
+          <input type="number" value="${st.weight||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'weight',parseFloat(this.value)||0)" placeholder="0"/>
+        </div>
+        <div>
+          <label>Distance (m)</label>
+          <input type="number" value="${st.distance||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'distance',parseFloat(this.value)||0)" placeholder="50"/>
+        </div>
       </div>` : unit === 'steps' ? `
-      <div class="form-row">
-        <label>Steps</label>
-        <input type="number" value="${st.reps||''}" inputmode="numeric" onfocus="this.select()"
-          onchange="updateStation(${idx},'reps',parseInt(this.value)||0)" placeholder="50"/>
+      <div class="form-row-2">
+        <div>
+          <label>Weight (kg)</label>
+          <input type="number" value="${st.weight||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'weight',parseFloat(this.value)||0)" placeholder="0"/>
+        </div>
+        <div>
+          <label>Steps</label>
+          <input type="number" value="${st.reps||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'reps',parseInt(this.value)||0)" placeholder="50"/>
+        </div>
       </div>` : unit === 'amrap' ? `
       <div class="form-row-2">
         <div>
@@ -2339,16 +2414,36 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
             onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="300"/>
         </div>
       </div>
-      <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:-4px;margin-bottom:8px;">Auto-advances when time runs out. Press LAP to finish early.</div>` : `
-      <div class="form-row">
-        <label>Seconds</label>
-        <input type="number" value="${st.time||''}" inputmode="numeric" onfocus="this.select()"
-          onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="60"/>
+` : `
+      <div class="form-row-2">
+        <div>
+          <label>Weight (kg)</label>
+          <input type="number" value="${st.weight||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'weight',parseFloat(this.value)||0)" placeholder="0"/>
+        </div>
+        <div>
+          <label>Seconds</label>
+          <input type="number" value="${st.time||''}" inputmode="numeric" onfocus="this.select()"
+            onchange="updateStation(${idx},'time',parseInt(this.value)||0)" placeholder="60"/>
+        </div>
       </div>`}
-      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
-      </div>`;
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);display:flex;gap:8px;align-items:center;">
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})"
+          style="font-size:12px;color:${st.notes ? 'var(--yellow)' : 'var(--text-lo)'};border-color:${st.notes ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">
+          ${st.notes ? '● Workout Notes' : '+ Workout Notes'}
+        </button>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
+          style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
+      </div>
+      ${(st._notesOpen || st.notes) ? `
+      <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+          onchange="updateStation(${idx},'notes',this.value)"
+          placeholder="Add a note for this station..." style="flex:1;"/>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+          style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
+      </div>` : ''}
+      `;
     }
   } else if (st.type === 'complex') {
     typeLabel = `<span style="color:var(--bronze);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">COMPLEX</span>`;
@@ -2361,10 +2456,23 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           onchange="updateStation(${idx},'reps',parseInt(this.value)||1)" placeholder="1"/>
       </div>
       ${chain ? `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-bottom:12px;line-height:1.5;">${esc(chain)}</div>` : ''}
-      ${(st._notesOpen || st.notes) ? `<div class="form-row"><input type="text" value="${esc(st.notes||'')}" onfocus="this.select()" onchange="updateStation(${idx},'notes',this.value)" placeholder="Notes..."/></div>` : `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})" style="font-size:12px;color:var(--text-lo);margin-bottom:8px;">+ Notes</button>`}
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);">
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})" style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
-      </div>`;
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule);display:flex;gap:8px;align-items:center;">
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();toggleStationNotes(${idx})"
+          style="font-size:12px;color:${st.notes ? 'var(--yellow)' : 'var(--text-lo)'};border-color:${st.notes ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">
+          ${st.notes ? '● Workout Notes' : '+ Workout Notes'}
+        </button>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
+          style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
+      </div>
+      ${(st._notesOpen || st.notes) ? `
+      <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+          onchange="updateStation(${idx},'notes',this.value)"
+          placeholder="Add a note for this station..." style="flex:1;"/>
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+          style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
+      </div>` : ''}
+      `;
     }
   }
 
@@ -2409,7 +2517,7 @@ function updateStation(idx, field, value) {
 
 function toggleStationNotes(idx) {
   if (S.wodBuilder.stations[idx]) {
-    S.wodBuilder.stations[idx]._notesOpen = true;
+    S.wodBuilder.stations[idx]._notesOpen = !S.wodBuilder.stations[idx]._notesOpen;
     renderWodBuilder();
   }
 }
@@ -2447,7 +2555,7 @@ function openAddStationSheet() {
     <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:14px;">Choose station type</div>
   </div>
   <div style="display:flex;flex-direction:column;gap:10px;">
-    <button class="btn-primary btn-full" onclick="openStationPickerSheet('cardio')">Cardio</button>
+    <button class="btn-primary btn-full" onclick="openStationPickerSheet('cardio')">Endurance</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('exercise')">Exercise</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('complex')">Complex</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('interval')" style="color:var(--interval);border-color:rgba(100,160,255,0.4);">&#x23F1; Interval / Rest</button>
@@ -2501,7 +2609,7 @@ async function openStationPickerSheet(type) {
       </div>`).join('') || `<div style="text-align:center;padding:20px;color:var(--text-lo);">No cardio exercises found</div>`;
 
     showSheet(`
-    <div style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Cardio</div>
+    <div style="margin-bottom:12px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Select Endurance</div>
     <div>${listHtml}</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
       <button class="btn-ghost btn-full" onclick="hideSheet();openExerciseBuilderFromWod();" style="color:var(--text-mid);font-size:13px;">+ New Cardio Exercise</button>
@@ -2671,7 +2779,8 @@ async function addStationFromPicker(id, type) {
       _pickerAddCount++;
       const counter = document.getElementById('picker-count');
       if (counter) counter.textContent = `· ${_pickerAddCount} added`;
-      await renderExercisePickerSheet();
+      // Delay sheet re-render until after flash animation completes (1500ms hold + 300ms fade)
+      setTimeout(() => renderExercisePickerSheet(), 1850);
     } else {
       hideSheet();
       setTimeout(() => {
@@ -2738,7 +2847,7 @@ async function confirmSaveWod(andStart) {
       <div style="text-align:center;padding:8px 0 4px;">
         <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;margin-bottom:8px;">Name Already Exists</div>
         <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:14px;margin-bottom:20px;">"${esc(name)}" is already in your library.</div>
-        <button class="btn-primary btn-full" style="margin-bottom:10px;" onclick="saveWodForce(${_andStart ? 'true' : 'false'}, ${JSON.stringify(_suggestedName)})">Save as "${esc(_suggestedName)}"</button>
+        <button class="btn-primary btn-full" style="margin-bottom:10px;" onclick="saveWodForce(${_andStart ? 'true' : 'false'}, '${esc(_suggestedName)}')">Save as "${esc(_suggestedName)}"</button>
         <button class="btn-ghost btn-full" onclick="hideModal();setTimeout(()=>openSaveModal(${_andStart ? 'true' : 'false'}),120)">← Rename</button>
       </div>`);
     return;
@@ -2755,7 +2864,10 @@ async function saveWodForce(andStart, nameOverride) {
     isPrebuilt: false,
     createdAt: Date.now(),
     stations: cleanStations,
-    tags: S.wodBuilder.tags || []
+    tags: S.wodBuilder.tags || [],
+    emomMode: S.wodBuilder.emomMode || false,
+    emomDuration: S.wodBuilder.emomDuration || 60,
+    emomRounds: S.wodBuilder.emomRounds || 0
   };
   await DB.put('wods', wodData);
   S.wodBuilder.id = wodData.id;
@@ -2835,9 +2947,16 @@ async function renderWodLibrary() {
   });
 
   const activeFilters = S.libraryTagFilters || [];
-  const filteredWods = activeFilters.length > 0
+  let filteredWods = activeFilters.length > 0
     ? wods.filter(w => activeFilters.every(t => (w.tags || []).includes(t)))
     : wods;
+
+  // Apply WOD type filter
+  if (S.libraryWodFilter === 'emom') {
+    filteredWods = filteredWods.filter(w => w.emomMode === true);
+  } else if (S.libraryWodFilter === 'standard') {
+    filteredWods = filteredWods.filter(w => !w.emomMode);
+  }
 
   const tagFilterPills = [
     `<div class="pill ${activeFilters.length === 0 ? 'active' : ''}" onclick="clearLibraryFilters()">All</div>`
@@ -2861,6 +2980,9 @@ async function renderWodLibrary() {
     const prebuiltBadge = wod.isPrebuilt
       ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;color:var(--text-lo);text-transform:uppercase;letter-spacing:0.5px;">BUILT-IN</span>`
       : '';
+    const emomBadge = wod.emomMode
+      ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--bronze);padding:2px 6px;border:1px solid var(--bronze-dim);border-radius:2px;">EMOM</span>`
+      : '';
     const expandedContent = isExpanded ? `
     <div style="padding:12px 16px;border-top:1px solid var(--rule);">
       <div style="display:flex;gap:8px;margin-bottom:10px;">
@@ -2881,6 +3003,7 @@ async function renderWodLibrary() {
           <div style="display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;">
             <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">${stCount} station${stCount!==1?'s':''}</span>
             ${prebuiltBadge}
+            ${emomBadge}
             ${tagPills}
           </div>
         </div>
@@ -2900,7 +3023,7 @@ async function renderWodLibrary() {
     <div class="nav-title">WOD Library</div>
     <div style="display:flex;gap:8px;">
       <button class="btn-ghost btn-sm" onclick="importWod()" title="Import WOD">Import</button>
-      <button class="btn-primary btn-sm" onclick="nav('wod-builder',{fresh:true})">+ New</button>
+      <button class="btn-primary btn-sm" onclick="openNewWodSheet()">+ New</button>
     </div>
   </div>
 
@@ -2910,6 +3033,11 @@ async function renderWodLibrary() {
     <div class="header-rule"></div>
   </div>
 
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+    <div class="pill ${S.libraryWodFilter==='all'?'active':''}" onclick="setLibraryWodFilter('all')">All</div>
+    <div class="pill ${S.libraryWodFilter==='standard'?'active':''}" onclick="setLibraryWodFilter('standard')">Standard</div>
+    <div class="pill ${S.libraryWodFilter==='emom'?'active':''}" onclick="setLibraryWodFilter('emom')">EMOM</div>
+  </div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
     <button class="btn-ghost btn-sm" onclick="openTagFilterModal()" style="color:${activeFilters.length > 0 ? 'var(--yellow)' : 'var(--text-mid)'};border-color:${activeFilters.length > 0 ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">&#127991; Filter${activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}</button>
     ${activeFilters.length > 0 ? `<button class="btn-ghost btn-sm" onclick="clearLibraryFilters()" style="font-size:12px;color:var(--text-lo);">Clear</button>` : ''}
@@ -2934,6 +3062,50 @@ function toggleLibraryFilter(tagName) {
 function clearLibraryFilters() {
   S.libraryTagFilters = [];
   renderWodLibrary();
+}
+
+function setLibraryWodFilter(val) {
+  S.libraryWodFilter = val;
+  renderWodLibrary();
+}
+
+function openNewWodSheet() {
+  showSheet(`
+  <div style="margin-bottom:6px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--bronze);margin-bottom:5px;">New Workout</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;text-transform:uppercase;color:var(--text-hi);letter-spacing:0.02em;">Choose Format</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--bronze) 0%,var(--bronze-mid) 30%,var(--bronze-dim) 55%,var(--rule-warm) 75%,transparent 100%);margin-top:8px;margin-bottom:20px;"></div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:16px;cursor:pointer;" onclick="hideSheet();nav('wod-builder',{fresh:true,emom:false})">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Standard</div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Station-by-station. Press LAP to advance.</div>
+        </div>
+        <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg-lift);border:1px solid rgba(184,118,42,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();nav('wod-builder',{fresh:true,emom:true})">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--bronze);"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);">EMOM</div>
+            <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--bronze);padding:2px 6px;border:1px solid var(--bronze-dim);border-radius:2px;">Every Minute</span>
+          </div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Timed rounds. Auto-advances each interval.</div>
+        </div>
+        <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:20px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-lo);cursor:pointer;" onclick="hideSheet()">Cancel</div>
+  </div>`);
 }
 
 async function openTagFilterModal() {
@@ -3088,6 +3260,12 @@ async function beginCountdown(wod) {
   t.amrapHalfFired = false;
   t.amrapTenFired = false;
   t.amrapCountdownFired = 0;
+  t.emomMode = wod.emomMode || false;
+  t.emomDuration = wod.emomDuration || 60;
+  t.totalRounds = wod.emomRounds || 0;
+  t.currentRound = 1;
+  t.emomFiveFired = false;
+  t.emomCountFired = 0;
 
   if (t.stations.length === 0) { toast('No stations in this WOD'); return; }
 
@@ -3135,6 +3313,19 @@ async function beginCountdown(wod) {
   tick();
 }
 
+function startNow() {
+  if (_countdownTimer) { clearTimeout(_countdownTimer); _countdownTimer = null; }
+  const overlay = document.getElementById('countdown-overlay');
+  if (overlay) overlay.classList.remove('active');
+  const t = S.timer;
+  startTimer();
+  if (t.emomMode) {
+    t.intervalEndMs = performance.now() + (t.emomDuration * 1000);
+  } else if (isIntervalStation(t.stations[0], t.exercises)) {
+    t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[0]);
+  }
+}
+
 function startTimer() {
   const t = S.timer;
   t.active = true;
@@ -3144,6 +3335,9 @@ function startTimer() {
   t.stationSegmentStartOffset = 0;
   t.stationSegments = [];
   t.stationActiveMs = 0;
+  if (t.emomMode) {
+    t.intervalEndMs = performance.now() + (t.emomDuration * 1000);
+  }
   reqWakeLock();
   renderTimerScreen();
   t.rafId = requestAnimationFrame(timerTick);
@@ -3187,8 +3381,22 @@ function timerTick() {
       }
     }
 
+    // EMOM countdown cues
+    if (t.emomMode && S.settings.voiceMode !== 'none') {
+      const _eRemSecs = Math.round(remaining / 1000);
+      if (_eRemSecs <= 5 && _eRemSecs >= 1 && t.emomCountFired !== _eRemSecs) {
+        t.emomCountFired = _eRemSecs;
+        speak(String(_eRemSecs));
+      }
+    }
+
     if (remaining <= 0) {
-      pressLap(true);
+      if (t.emomMode) {
+        beep(880, 0.3, 0.8);
+        pressLap(true, true);
+      } else {
+        pressLap(true);
+      }
       return;
     }
   }
@@ -3259,7 +3467,7 @@ function resumeTimer() {
   t.rafId = requestAnimationFrame(timerTick);
 }
 
-function pressLap(autoLap = false) {
+function pressLap(autoLap = false, isEmomCall = false) {
   const t = S.timer;
   if (!t.active || t.paused || t.lapLocked) return;
   const nowMs = performance.now();
@@ -3296,20 +3504,47 @@ function pressLap(autoLap = false) {
   t.stationSegments = [];
   t.stationActiveMs = 0;
   cancelAnimationFrame(t.rafId);
-  if (autoLap) {
-    beepAlert();
-  } else {
-    beep(880, 0.15, 0.8);
+  if (!isEmomCall) {
+    if (autoLap) { beepAlert(); } else { beep(880, 0.15, 0.8); }
   }
   const lapBtn = document.getElementById('lap-btn');
   if (lapBtn) { lapBtn.style.animation = 'none'; lapBtn.offsetHeight; lapBtn.style.animation = 'lapPulse 0.2s ease'; }
+
+  // EMOM: check if last station in cycle — wrap around
+  if (t.emomMode) {
+    const isLastStation = t.stationIdx >= t.stations.length - 1;
+    if (isLastStation) {
+      t.currentRound++;
+      if (t.totalRounds > 0 && t.currentRound > t.totalRounds) {
+        t.active = false;
+        t.lapLocked = true;
+        setTimeout(() => { t.lapLocked = false; }, 1000);
+        relWakeLock();
+        setTimeout(() => showWorkoutCompleteModal(), 350);
+        return;
+      }
+      t.stationIdx = 0;
+    } else {
+      t.stationIdx++;
+    }
+    t.stationSegmentStartMs = performance.now();
+    t.stationSegmentStartOffset = performance.now() - t.startMs;
+    t.intervalEndMs = performance.now() + (t.emomDuration * 1000);
+    t.amrapHalfFired = false; t.amrapTenFired = false; t.amrapCountdownFired = 0;
+    t.emomFiveFired = false; t.emomCountFired = 0;
+    const nextSt = t.stations[t.stationIdx];
+    speak(speakify(`Round ${t.currentRound}. ${getStationName(nextSt, t.exercises, t.complexes)}`));
+    renderTimerScreen();
+    t.rafId = requestAnimationFrame(timerTick);
+    return;
+  }
 
   if (t.stationIdx >= t.stations.length - 1) {
     t.active = false;
     t.lapLocked = true;
     setTimeout(() => { t.lapLocked = false; }, 1000);
     relWakeLock();
-    showWorkoutCompleteModal();
+    setTimeout(() => showWorkoutCompleteModal(), 350);
   } else {
     t.stationIdx++;
     t.stationSegmentStartMs = performance.now();
@@ -3358,6 +3593,30 @@ function undoLap() {
   t.rafId = requestAnimationFrame(timerTick);
   toast('Lap undone');
   speakStation(t.stations[t.stationIdx], t.exercises, t.complexes);
+}
+
+function emomBack() {
+  const t = S.timer;
+  if (!t.emomMode) return;
+  cancelAnimationFrame(t.rafId);
+  if (t.stationIdx > 0) {
+    t.stationIdx--;
+  } else if (t.currentRound > 1) {
+    t.currentRound--;
+    t.stationIdx = t.stations.length - 1;
+  } else {
+    t.rafId = requestAnimationFrame(timerTick);
+    return;
+  }
+  t.stationSegmentStartMs = performance.now();
+  t.stationActiveMs = 0;
+  t.stationSegments = [];
+  t.intervalEndMs = performance.now() + (t.emomDuration * 1000);
+  t.emomFiveFired = false;
+  t.emomCountFired = 0;
+  speakStation(t.stations[t.stationIdx], t.exercises, t.complexes);
+  renderTimerScreen();
+  t.rafId = requestAnimationFrame(timerTick);
 }
 
 function showWorkoutCompleteModal() {
@@ -3419,7 +3678,10 @@ async function finishAndSaveSession() {
     totalDuration: wallClockMs / 1000,
     laps: [...t.laps],
     journalPending: true,
-    journal: null
+    journal: null,
+    emomMode: t.emomMode || false,
+    emomDuration: t.emomDuration || 60,
+    totalRounds: t.currentRound - 1
   };
 
   await DB.put('sessions', session);
@@ -3488,8 +3750,11 @@ function renderTimerScreen() {
   const isCardio = st.type === 'cardio';
   const ex = st.exerciseId ? exercises.find(e => e.id === st.exerciseId) : null;
   const cx = st.complexId ? complexes.find(c => c.id === st.complexId) : null;
-  const spec = stationSpecLine(st, exercises, complexes);
+  const spec = st.type === 'complex'
+    ? (st.reps && st.reps > 1 ? `${st.reps} rounds` : '1 round')
+    : stationSpecLine(st, exercises, complexes);
   const currentIsInterval = isIntervalStation(st, exercises);
+  const isEmom = t.emomMode === true;
 
   let complexHtml = '';
   if (st.type === 'complex' && cx) {
@@ -3500,7 +3765,12 @@ function renderTimerScreen() {
   }
 
   let dotsHtml = '';
-  if (stations.length <= 16) {
+  if (isEmom) {
+    const roundDisplay = t.totalRounds > 0
+      ? `ROUND ${t.currentRound} OF ${t.totalRounds}`
+      : `ROUND ${t.currentRound}`;
+    dotsHtml = `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.1em;">${roundDisplay}</div>`;
+  } else if (stations.length <= 16) {
     dotsHtml = `<div class="progress-dots">` +
       stations.map((s, i) =>
         `<div class="progress-dot ${i < idx ? 'done' : i === idx ? 'current' : ''}"></div>`
@@ -3553,7 +3823,17 @@ function renderTimerScreen() {
   const wallMs = t.active ? (nowMs - t.startMs) : 0;
 
   let timerInnerHtml;
-  if (currentIsInterval) {
+  if (isEmom) {
+    const remainingMs = t.intervalEndMs > 0
+      ? Math.max(0, t.intervalEndMs - nowMs)
+      : (t.emomDuration * 1000);
+    timerInnerHtml = `
+    <div id="interval-countdown" class="timer-num" style="color:var(--bronze);">${fmtMM(remainingMs / 1000)}</div>
+    <div class="timer-sublabel" style="color:var(--bronze);">INTERVAL</div>
+    <div class="timer-divider"></div>
+    <div id="station-display" class="timer-num-sub">${fmtMM(wallMs / 1000)}</div>
+    <div class="timer-sublabel">TOTAL TIME</div>`;
+  } else if (currentIsInterval) {
     const remainingMs = t.intervalEndMs > 0
       ? Math.max(0, t.intervalEndMs - nowMs)
       : getIntervalDuration(st);
@@ -3572,12 +3852,23 @@ function renderTimerScreen() {
     <div class="timer-sublabel">TOTAL TIME</div>`;
   }
 
-  let controlsHtml = `
+  let controlsHtml;
+  if (isEmom) {
+    const canGoBack = t.stationIdx > 0 || t.currentRound > 1;
+    controlsHtml = `
+    <div class="lap-controls-row">
+      <button class="lap-btn-aux" onclick="emomBack()" style="${!canGoBack ? 'opacity:0;pointer-events:none;' : ''}" title="Previous">&#x2039;</button>
+      <button class="lap-btn-aux" onclick="pauseTimer()" style="flex:1;">${icons.pause}</button>
+      <button class="lap-btn-aux" onclick="pressLap(false, true)" title="Next">&#x203a;</button>
+    </div>`;
+  } else {
+    controlsHtml = `
     <div class="lap-controls-row">
       <button class="lap-btn-aux" onclick="undoLap()" title="Undo last lap" style="${t.canUndo ? '' : 'opacity:0.3;'}">↩</button>
       <button id="lap-btn" class="lap-btn" onclick="pressLap()">LAP</button>
       <button class="lap-btn-aux" onclick="pauseTimer()">${icons.pause}</button>
     </div>`;
+  }
 
   let wodRightHtml = `
     <div class="wod-panel-title">${esc(t.wod ? t.wod.name : '')}</div>
@@ -3626,7 +3917,7 @@ function renderTimerScreen() {
 
       <div class="timer-content" id="timer-left">
         <div class="now-card station-enter">
-          <div class="now-overline">${currentIsInterval ? 'INTERVAL' : isCardio ? 'CARDIO' : 'NOW'}</div>
+          <div class="now-overline">${currentIsInterval ? 'INTERVAL' : isCardio ? 'ENDURANCE' : 'NOW'}</div>
           <div class="now-name" style="${nowNameColor}">${esc(stName.toUpperCase())}</div>
           ${spec ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;color:var(--text-mid);margin-top:5px;letter-spacing:0.03em;text-transform:uppercase;">${esc(spec)}</div>` : ''}
         </div>
@@ -4079,10 +4370,14 @@ async function renderHistory() {
 async function renderSettings() {
   const settings = S.settings;
 
-  const countdownOptions = [3, 5, 10, 15].map(v =>
-    `<button class="pill ${settings.countdownDuration === v ? 'active' : ''}" onclick="setCountdown(${v})">${v}s</button>`
+  const countdownPresets = [3, 5, 10, 15].map(v =>
+    `<button class="pill ${settings.countdownDuration === v && !settings.countdownCustom ? 'active' : ''}" onclick="setCountdown(${v})">${v}s</button>`
   ).join('');
 
+  const customCountdownVal = settings.countdownCustom || '';
+  const customActive = !!settings.countdownCustom;
+
+  const voiceOpen = settings.voiceSettingsOpen;
   const voiceOptions = [
     { v: 'female', l: 'On' },
     { v: 'none', l: 'Off' }
@@ -4097,6 +4392,13 @@ async function renderSettings() {
     `<button class="pill ${(settings.voiceDetail || 'name') === o.v ? 'active' : ''}" onclick="setVoiceDetail('${o.v}')">${o.l}</button>`
   ).join('');
 
+  const voiceSpeedOptions = [
+    { v: 'normal', l: 'Normal' },
+    { v: 'fast', l: 'Fast' }
+  ].map(o =>
+    `<button class="pill ${(settings.voiceSpeed || 'normal') === o.v ? 'active' : ''}" onclick="setVoiceSpeed('${o.v}')">${o.l}</button>`
+  ).join('');
+
   document.getElementById('screen-settings').innerHTML = `
   <div class="nav-header">
     <div class="nav-back" onclick="nav('home')">← Back</div>
@@ -4105,6 +4407,7 @@ async function renderSettings() {
   </div>
   <div class="header-rule"></div>
 
+  <!-- Countdown Duration -->
   <div class="card">
     <div class="settings-row">
       <div>
@@ -4112,33 +4415,53 @@ async function renderSettings() {
         <div class="settings-sublabel">Seconds before workout starts</div>
       </div>
     </div>
-    <div class="pill-row" style="margin-bottom:0;">${countdownOptions}</div>
+    <div class="pill-row" style="margin-bottom:8px;flex-wrap:wrap;">
+      ${countdownPresets}
+      <button class="pill ${customActive ? 'active' : ''}" onclick="toggleCustomCountdown()">Custom</button>
+    </div>
+    ${customActive || settings._showCustomInput ? `
+    <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+      <input type="number" id="custom-countdown-input" value="${customCountdownVal}" inputmode="numeric"
+        placeholder="e.g. 20" onfocus="this.select()"
+        style="width:90px;"
+        onchange="setCustomCountdown(parseInt(this.value)||null)"/>
+      <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">seconds</div>
+    </div>` : ''}
   </div>
 
+  <!-- Voice Settings (expandable) -->
   <div class="card" style="margin-top:12px;">
-    <div class="settings-row">
+    <div class="settings-row" style="cursor:pointer;" onclick="toggleVoiceSettings()">
       <div>
-        <div class="settings-label">Voice Announcements</div>
-        <div class="settings-sublabel">Announce next station</div>
+        <div class="settings-label">Voice Settings</div>
+        <div class="settings-sublabel">${settings.voiceMode === 'none' ? 'Off' : settings.voiceDetail === 'full' ? 'On · Full Readout · ' + (settings.voiceSpeed === 'fast' ? 'Fast' : 'Normal') : 'On · Name Only · ' + (settings.voiceSpeed === 'fast' ? 'Fast' : 'Normal')}</div>
       </div>
+      <div style="color:var(--text-lo);font-size:16px;transition:transform 0.2s;transform:rotate(${voiceOpen ? 90 : 0}deg);">›</div>
     </div>
-    <div class="pill-row" style="margin-bottom:0;">${voiceOptions}</div>
-  </div>
-
-  <div class="card" style="margin-top:12px;">
-    <div class="settings-row">
+    ${voiceOpen ? `
+    <div style="border-top:1px solid var(--rule);padding-top:14px;margin-top:4px;display:flex;flex-direction:column;gap:14px;">
       <div>
-        <div class="settings-label">Voice Detail</div>
-        <div class="settings-sublabel">What to announce at each station</div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:6px;">Announcements</div>
+        <div class="pill-row" style="margin-bottom:0;">${voiceOptions}</div>
       </div>
-    </div>
-    <div class="pill-row" style="margin-bottom:0;">${voiceDetailOptions}</div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:6px;">Detail Level</div>
+        <div class="pill-row" style="margin-bottom:0;">${voiceDetailOptions}</div>
+      </div>
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:6px;">Speed</div>
+        <div class="pill-row" style="margin-bottom:0;">${voiceSpeedOptions}</div>
+      </div>
+      <div>
+        <button class="btn-ghost btn-full" onclick="testVoice()" style="color:var(--bronze);border-color:var(--bronze-dim);">Test Voice</button>
+      </div>
+    </div>` : ''}
   </div>
 
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.4</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5</div>
     </div>
   </div>
 
@@ -4149,6 +4472,8 @@ async function renderSettings() {
 
 async function setCountdown(val) {
   S.settings.countdownDuration = val;
+  S.settings.countdownCustom = null;
+  S.settings._showCustomInput = false;
   await saveSettings();
   await renderSettings();
 }
@@ -4209,6 +4534,46 @@ async function setVoiceDetail(val) {
   S.settings.voiceDetail = val;
   await saveSettings();
   await renderSettings();
+}
+
+async function setVoiceSpeed(val) {
+  S.settings.voiceSpeed = val;
+  await saveSettings();
+  await renderSettings();
+}
+
+async function toggleVoiceSettings() {
+  S.settings.voiceSettingsOpen = !S.settings.voiceSettingsOpen;
+  await saveSettings();
+  await renderSettings();
+}
+
+async function toggleCustomCountdown() {
+  S.settings._showCustomInput = !S.settings._showCustomInput;
+  if (!S.settings._showCustomInput) {
+    S.settings.countdownCustom = null;
+  }
+  await saveSettings();
+  await renderSettings();
+}
+
+async function setCustomCountdown(val) {
+  if (!val || val < 1) {
+    S.settings.countdownCustom = null;
+  } else {
+    S.settings.countdownDuration = val;
+    S.settings.countdownCustom = val;
+  }
+  await saveSettings();
+  await renderSettings();
+}
+
+function testVoice() {
+  const isFullReadout = S.settings.voiceDetail === 'full';
+  const testText = isFullReadout
+    ? 'Wall Balls, six kilograms, fifty reps'
+    : 'Wall Balls';
+  speak(speakify(testText));
 }
 
 // -- Tag management --
@@ -4548,7 +4913,16 @@ async function init() {
     }
     await renderHome();
     showScreen('home');
-    document.addEventListener('touchstart', () => getACtx(), { once: true, passive: true });
+    document.addEventListener('touchstart', () => {
+      getACtx();
+      if (window.speechSynthesis && S.settings.voiceMode !== 'none') {
+        try {
+          const _w = new SpeechSynthesisUtterance('');
+          _w.volume = 0;
+          speechSynthesis.speak(_w);
+        } catch(e) {}
+      }
+    }, { once: true, passive: true });
     document.addEventListener('click', () => getACtx(), { once: true });
   } catch(e) {
     console.error('Init error:', e);
