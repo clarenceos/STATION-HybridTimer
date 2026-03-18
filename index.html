@@ -925,7 +925,10 @@ input[type="range"]::-moz-range-thumb {
   <div id="countdown-label">GET READY</div>
   <div id="countdown-num">3</div>
   <div id="countdown-station"></div>
-  <button onclick="startNow()" style="margin-top:24px;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.3em;color:rgba(234,228,217,0.4);background:none;border:none;cursor:pointer;padding:8px 16px;">Start Now</button>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:28px;">
+    <button onclick="startNow()" class="btn-ghost" style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:0.2em;min-width:140px;">Start Now</button>
+    <button onclick="cancelCountdown()" style="font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.2em;color:rgba(234,228,217,0.25);background:none;border:none;cursor:pointer;padding:6px 12px;">Cancel</button>
+  </div>
 </div>
 
 <script>
@@ -1294,7 +1297,8 @@ function speakStation(st, exercises, complexes) {
 
   if (st.type === 'complex' && cx) {
     const chain = cx.movements.map(m => `${m.reps} ${speakify(m.name)}`).join(', ');
-    speak(`${name}. ${chain}`);
+    const roundsStr = st.reps && st.reps > 1 ? `${st.reps} rounds. ` : '';
+    speak(`${name}. ${roundsStr}${chain}`);
     return;
   }
 
@@ -1662,7 +1666,10 @@ async function nav(screen, params) {
         name: params.wod.name || '',
         id: params.isNew ? null : params.wod.id,
         isNew: !!params.isNew,
-        tags: params.wod.tags ? [...params.wod.tags] : []
+        tags: params.wod.tags ? [...params.wod.tags] : [],
+        emomMode: params.wod.emomMode || false,
+        emomDuration: params.wod.emomDuration || 60,
+        emomRounds: params.wod.emomRounds || 1
       };
     } else if (params.fresh) {
       S.wodBuilder = {
@@ -1789,7 +1796,7 @@ async function renderHome() {
 
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
         <button class="btn-primary btn-full" onclick="nav('wod-library')">WOD Library</button>
-        <button class="btn-primary btn-full" onclick="nav('wod-builder',{fresh:true})">WOD Builder</button>
+        <button class="btn-primary btn-full" onclick="openNewWodSheet()">WOD Builder</button>
         <button class="btn-ghost btn-full" onclick="nav('exercises')">Exercise Builder</button>
         <button class="btn-ghost btn-full" onclick="nav('history')">Station History</button>
       </div>
@@ -2251,23 +2258,29 @@ async function renderWodBuilder() {
   </div>
 
   ${isEmom ? `
-  <div class="form-row">
-    <label>Interval Duration</label>
-    <div class="pill-row" style="margin-bottom:0;">
-      ${[60, 90, 120].map(d =>
-        `<button class="pill ${S.wodBuilder.emomDuration === d ? 'active' : ''}" onclick="S.wodBuilder.emomDuration=${d};renderWodBuilder()">${d}s</button>`
-      ).join('')}
-    </div>
-  </div>
-  <div class="form-row">
-    <label>Total Rounds</label>
-    <input type="number" id="emom-rounds-input" value="${S.wodBuilder.emomRounds || ''}" inputmode="numeric" onfocus="this.select()"
-      onchange="S.wodBuilder.emomRounds=parseInt(this.value)||0" placeholder="10"/>
+  <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">${S.wodBuilder.emomDuration}s per interval</div>
+    <button class="btn-ghost btn-sm" onclick="openEmomConfigModal()" style="font-size:12px;color:var(--bronze);border-color:var(--bronze-dim);">Edit</button>
   </div>` : ''}
 
   <div id="station-list">${stationsHtml}</div>
 
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+    ${isEmom && stations.length > 0 ? (() => {
+      const rounds = S.wodBuilder.emomRounds || 1;
+      const totalIntervals = stations.length * rounds;
+      const totalSecs = totalIntervals * (S.wodBuilder.emomDuration || 60);
+      return `
+      <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:12px 16px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:10px;">Rounds</div>
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
+          <button class="btn-ghost btn-sm" onclick="adjustEmomRounds(-1)" style="min-width:40px;width:40px;height:40px;min-height:40px;font-size:20px;padding:0;${rounds<=1?'opacity:0.3;pointer-events:none;':''}">−</button>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:36px;color:var(--text-hi);flex:1;text-align:center;">${rounds}</div>
+          <button class="btn-ghost btn-sm" onclick="adjustEmomRounds(1)" style="min-width:40px;width:40px;height:40px;min-height:40px;font-size:20px;padding:0;">+</button>
+        </div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);text-align:center;">${stations.length} station${stations.length!==1?'s':''} · ${rounds} round${rounds!==1?'s':''} = ${totalIntervals} total intervals · ${fmtMM(totalSecs)}</div>
+      </div>`;
+    })() : ''}
     <button class="btn-ghost btn-full" onclick="openAddStationSheet()">+ Add Station</button>
     ${stations.length > 0 ? (() => {
       const isSaved = S.wodBuilder.isNew === false && !!S.wodBuilder.id;
@@ -2306,12 +2319,12 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
           style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>
-      ${(st._notesOpen || st.notes) ? `
+      ${st._notesOpen ? `
       <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+        <input type="text" id="notes-input-${idx}" value="${esc(st.notes||'')}" onfocus="this.select()"
           onchange="updateStation(${idx},'notes',this.value)"
           placeholder="Add a note for this station..." style="flex:1;"/>
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();saveAndCloseNotes(${idx},'#notes-input-${idx}')"
           style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
       </div>` : ''}
       `;
@@ -2338,12 +2351,12 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           ${st.notes ? '● Workout Notes' : '+ Workout Notes'}
         </button>
       </div>
-      ${(st._notesOpen || st.notes) ? `
+      ${st._notesOpen ? `
       <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+        <input type="text" id="notes-input-${idx}" value="${esc(st.notes||'')}" onfocus="this.select()"
           onchange="updateStation(${idx},'notes',this.value)"
           placeholder="Add a note for this station..." style="flex:1;"/>
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();saveAndCloseNotes(${idx},'#notes-input-${idx}')"
           style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
       </div>` : ''}
       `;
@@ -2359,6 +2372,7 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
           <button class="unit-btn ${unit==='amrap'?'active':''}" onclick="updateStation(${idx},'unit','amrap');renderWodBuilder()">AMRAP</button>
         </div>
         <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-top:4px;min-height:14px;">${
+          unit === 'reps' ? 'Enter weight and reps for this movement.' :
           unit === 'meters' ? 'For turf or track work with measured distance markers.' :
           unit === 'seconds' ? 'For holds and static work. Press LAP when you\'re done.' :
           unit === 'steps' ? 'For carries in small spaces — count steps instead of meters.' :
@@ -2435,12 +2449,12 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
           style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>
-      ${(st._notesOpen || st.notes) ? `
+      ${st._notesOpen ? `
       <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+        <input type="text" id="notes-input-${idx}" value="${esc(st.notes||'')}" onfocus="this.select()"
           onchange="updateStation(${idx},'notes',this.value)"
           placeholder="Add a note for this station..." style="flex:1;"/>
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();saveAndCloseNotes(${idx},'#notes-input-${idx}')"
           style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
       </div>` : ''}
       `;
@@ -2464,12 +2478,12 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
         <button class="btn-ghost btn-sm" onclick="event.stopPropagation();quickAddRest(${idx})"
           style="color:var(--bronze);border-color:var(--bronze-dim);font-size:12px;">+ Rest</button>
       </div>
-      ${(st._notesOpen || st.notes) ? `
+      ${st._notesOpen ? `
       <div class="form-row" style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-        <input type="text" value="${esc(st.notes||'')}" onfocus="this.select()"
+        <input type="text" id="notes-input-${idx}" value="${esc(st.notes||'')}" onfocus="this.select()"
           onchange="updateStation(${idx},'notes',this.value)"
           placeholder="Add a note for this station..." style="flex:1;"/>
-        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();updateStation(${idx},'notes',document.querySelector('#station-item-${idx} input[placeholder]')?.value||'');toggleStationNotes(${idx})"
+        <button class="btn-ghost btn-sm" onclick="event.stopPropagation();saveAndCloseNotes(${idx},'#notes-input-${idx}')"
           style="min-width:36px;width:36px;padding:0;color:var(--yellow);border-color:rgba(212,224,0,0.3);">✓</button>
       </div>` : ''}
       `;
@@ -2520,6 +2534,13 @@ function toggleStationNotes(idx) {
     S.wodBuilder.stations[idx]._notesOpen = !S.wodBuilder.stations[idx]._notesOpen;
     renderWodBuilder();
   }
+}
+
+function saveAndCloseNotes(idx, selector) {
+  const val = document.querySelector(selector)?.value || '';
+  updateStation(idx, 'notes', val);
+  if (S.wodBuilder.stations[idx]) S.wodBuilder.stations[idx]._notesOpen = false;
+  renderWodBuilder();
 }
 
 function moveStation(idx, dir) {
@@ -2767,20 +2788,20 @@ async function addStationFromPicker(id, type) {
           btn.style.fontSize = '22px';
           btn.style.transition = '';
           setTimeout(() => {
-            btn.style.transition = 'opacity 0.3s';
+            btn.style.transition = 'opacity 0.6s';
             btn.style.opacity = '0';
             setTimeout(() => {
               btn.textContent = '+'; btn.style.color = 'var(--yellow)'; btn.style.fontSize = '20px';
               btn.style.opacity = '1'; btn.style.transition = '';
-            }, 300);
-          }, 1500);
+            }, 600);
+          }, 800);
         }
       });
       _pickerAddCount++;
       const counter = document.getElementById('picker-count');
       if (counter) counter.textContent = `· ${_pickerAddCount} added`;
-      // Delay sheet re-render until after flash animation completes (1500ms hold + 300ms fade)
-      setTimeout(() => renderExercisePickerSheet(), 1850);
+      // Delay sheet re-render until after flash animation completes (800ms hold + 600ms fade)
+      setTimeout(() => renderExercisePickerSheet(), 1450);
     } else {
       hideSheet();
       setTimeout(() => {
@@ -2793,6 +2814,7 @@ async function addStationFromPicker(id, type) {
 
 async function openSaveModal(andStart = false) {
   if (S.wodBuilder.stations.length === 0) { toast('Add at least one station'); return; }
+  if (S.wodBuilder.emomMode && (!S.wodBuilder.emomRounds || S.wodBuilder.emomRounds < 1)) { toast('Set at least 1 round'); return; }
   const allTags = await DB.all('tags');
   const selected = S.wodBuilder.tags || [];
   const pillsHtml = allTags.map(t =>
@@ -2889,7 +2911,9 @@ async function startWodFromBuilder() { await openSaveModal(true); }
 
 async function startSavedWod() {
   const wod = await DB.get('wods', S.wodBuilder.id);
-  if (wod) beginCountdown(wod);
+  if (!wod) return;
+  if (wod.emomMode && (!wod.emomRounds || wod.emomRounds < 1)) { toast('Set at least 1 round'); return; }
+  beginCountdown(wod);
 }
 
 function wodBuilderBack() {
@@ -3088,7 +3112,7 @@ function openNewWodSheet() {
       </div>
     </div>
 
-    <div style="background:var(--bg-lift);border:1px solid rgba(184,118,42,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();nav('wod-builder',{fresh:true,emom:true})">
+    <div style="background:var(--bg-lift);border:1px solid rgba(184,118,42,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();openEmomSetupModal()">
       <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--bronze);"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
         <div>
@@ -3106,6 +3130,61 @@ function openNewWodSheet() {
   <div style="text-align:center;margin-top:20px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-lo);cursor:pointer;" onclick="hideSheet()">Cancel</div>
   </div>`);
+}
+
+function openEmomSetupModal() {
+  if (!S._emomSetupDuration) S._emomSetupDuration = 60;
+  const dur = S._emomSetupDuration;
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--bronze);margin-bottom:5px;">New EMOM</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;text-transform:uppercase;color:var(--text-hi);">Configure</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--bronze) 0%,var(--bronze-mid) 30%,var(--bronze-dim) 55%,transparent 100%);margin-top:8px;margin-bottom:20px;"></div>
+  </div>
+  <div class="form-row">
+    <label>Name</label>
+    <input type="text" id="emom-setup-name" value="${esc('EMOM \u00b7 ' + todayStr())}" onfocus="this.select()" placeholder="e.g. EMOM Burner"/>
+  </div>
+  <div class="form-row">
+    <label>Interval Duration</label>
+    <div class="pill-row" style="margin-bottom:0;">
+      <button class="pill ${dur===60?'active':''}" onclick="S._emomSetupDuration=60;openEmomSetupModal()">60s</button>
+      <button class="pill ${dur===90?'active':''}" onclick="S._emomSetupDuration=90;openEmomSetupModal()">90s</button>
+      <button class="pill ${dur===120?'active':''}" onclick="S._emomSetupDuration=120;openEmomSetupModal()">120s</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:20px;">
+    <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+    <button class="btn-primary btn-full" onclick="confirmEmomSetup()">Continue</button>
+  </div>`);
+}
+
+function confirmEmomSetup() {
+  const name = (document.getElementById('emom-setup-name')?.value || '').trim() || `EMOM \u00b7 ${todayStr()}`;
+  const dur = S._emomSetupDuration || 60;
+  S._emomSetupDuration = null;
+  hideModal();
+  S.wodBuilder = { stations: [], name, id: null, isNew: true, tags: [], emomMode: true, emomDuration: dur, emomRounds: 1 };
+  renderWodBuilder();
+  showScreen('wod-builder');
+}
+
+function openEmomConfigModal() {
+  const dur = S.wodBuilder.emomDuration || 60;
+  showModal(`
+  <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;margin-bottom:16px;">Interval Duration</div>
+  <div class="pill-row" style="margin-bottom:20px;">
+    <button class="pill ${dur===60?'active':''}" onclick="S.wodBuilder.emomDuration=60;hideModal();renderWodBuilder()">60s</button>
+    <button class="pill ${dur===90?'active':''}" onclick="S.wodBuilder.emomDuration=90;hideModal();renderWodBuilder()">90s</button>
+    <button class="pill ${dur===120?'active':''}" onclick="S.wodBuilder.emomDuration=120;hideModal();renderWodBuilder()">120s</button>
+  </div>
+  <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>`);
+}
+
+function adjustEmomRounds(delta) {
+  const current = S.wodBuilder.emomRounds || 1;
+  S.wodBuilder.emomRounds = Math.max(1, current + delta);
+  renderWodBuilder();
 }
 
 async function openTagFilterModal() {
@@ -3193,6 +3272,7 @@ async function editLibraryWod(id, isPrebuilt) {
 async function startLibraryWod(id) {
   const wod = await DB.get('wods', id);
   if (!wod) return;
+  if (wod.emomMode && (!wod.emomRounds || wod.emomRounds < 1)) { toast('Set at least 1 round'); return; }
   beginCountdown(wod);
 }
 
@@ -3294,7 +3374,11 @@ async function beginCountdown(wod) {
     if (count <= 0) {
       numEl.textContent = 'GO!';
       beep(880, 0.4, 0.8);
-      speakStation(firstStation, exercises, complexes);
+      if (S.timer.emomMode) {
+        speak(speakify(`Round 1. ${getStationName(firstStation, exercises, complexes)}`));
+      } else {
+        speakStation(firstStation, exercises, complexes);
+      }
       setTimeout(() => {
         overlay.classList.remove('active');
         startTimer();
@@ -3311,6 +3395,14 @@ async function beginCountdown(wod) {
   const ctx = getACtx();
   if (ctx.state === 'suspended') { await ctx.resume().catch(() => {}); }
   tick();
+}
+
+function cancelCountdown() {
+  if (_countdownTimer) { clearTimeout(_countdownTimer); _countdownTimer = null; }
+  const overlay = document.getElementById('countdown-overlay');
+  if (overlay) overlay.classList.remove('active');
+  S.timer.active = false;
+  nav('wod-library');
 }
 
 function startNow() {
@@ -3533,7 +3625,11 @@ function pressLap(autoLap = false, isEmomCall = false) {
     t.amrapHalfFired = false; t.amrapTenFired = false; t.amrapCountdownFired = 0;
     t.emomFiveFired = false; t.emomCountFired = 0;
     const nextSt = t.stations[t.stationIdx];
-    speak(speakify(`Round ${t.currentRound}. ${getStationName(nextSt, t.exercises, t.complexes)}`));
+    if (isLastStation) {
+      speak(speakify(`Round ${t.currentRound}. ${getStationName(nextSt, t.exercises, t.complexes)}`));
+    } else {
+      speakStation(nextSt, t.exercises, t.complexes);
+    }
     renderTimerScreen();
     t.rafId = requestAnimationFrame(timerTick);
     return;
@@ -3766,10 +3862,12 @@ function renderTimerScreen() {
 
   let dotsHtml = '';
   if (isEmom) {
-    const roundDisplay = t.totalRounds > 0
-      ? `ROUND ${t.currentRound} OF ${t.totalRounds}`
-      : `ROUND ${t.currentRound}`;
-    dotsHtml = `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.1em;">${roundDisplay}</div>`;
+    const currentInterval = (t.currentRound - 1) * stations.length + idx + 1;
+    const totalIntervals = t.totalRounds > 0 ? t.totalRounds * stations.length : null;
+    const intervalDisplay = totalIntervals
+      ? `STATION ${currentInterval} OF ${totalIntervals}`
+      : `STATION ${currentInterval}`;
+    dotsHtml = `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.1em;">${intervalDisplay}</div>`;
   } else if (stations.length <= 16) {
     dotsHtml = `<div class="progress-dots">` +
       stations.map((s, i) =>
@@ -3783,7 +3881,14 @@ function renderTimerScreen() {
     </div>`;
   }
 
-  const nextSt = stations[idx + 1];
+  let effectiveNextSt = stations[idx + 1];
+  // EMOM: on last station of a round, show first station of next round (not FINISH LINE)
+  // unless this is the actual last interval
+  if (!effectiveNextSt && isEmom) {
+    const isActuallyLast = t.totalRounds > 0 && t.currentRound >= t.totalRounds;
+    if (!isActuallyLast) effectiveNextSt = stations[0];
+  }
+  const nextSt = effectiveNextSt;
   let nextHtml;
   if (!nextSt) {
     nextHtml = `
@@ -3916,6 +4021,7 @@ function renderTimerScreen() {
       </div>
 
       <div class="timer-content" id="timer-left">
+        ${isEmom ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:0.15em;color:var(--text-mid);margin-bottom:6px;padding-left:2px;">${t.totalRounds > 0 ? `ROUND ${t.currentRound} OF ${t.totalRounds}` : `ROUND ${t.currentRound}`}</div>` : ''}
         <div class="now-card station-enter">
           <div class="now-overline">${currentIsInterval ? 'INTERVAL' : isCardio ? 'ENDURANCE' : 'NOW'}</div>
           <div class="now-name" style="${nowNameColor}">${esc(stName.toUpperCase())}</div>
@@ -3983,12 +4089,15 @@ function showWodSidebar() {
     </div>`;
   }).join('');
 
+  const _isEmomSidebar = t.emomMode === true;
   showModal(`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">${esc(t.wod ? t.wod.name : 'WOD')}</div>
     <button class="btn-ghost btn-sm" onclick="hideModal()" style="min-width:36px;width:36px;padding:0;">✕</button>
   </div>
-  <div>${stHtml}</div>`);
+  <div>${stHtml}</div>
+  ${_isEmomSidebar ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--rule);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.1em;color:var(--bronze);">${t.totalRounds > 0 ? `ROUND ${t.currentRound} OF ${t.totalRounds}` : `ROUND ${t.currentRound}`}</div>` : ''}
+  `);
 }
 
 // ============================================================
@@ -4461,7 +4570,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5.1</div>
     </div>
   </div>
 
