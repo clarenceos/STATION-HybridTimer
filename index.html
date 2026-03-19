@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-5K9JXDE9K7"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-5K9JXDE9K7');</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -915,7 +917,7 @@ input[type="range"]::-moz-range-thumb {
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--text-lo);margin-top:6px;margin-bottom:24px;">RESTING</div>
     <div style="display:flex;gap:12px;">
       <button class="btn-ghost btn-full" onclick="stopWorkout()" style="color:var(--error);border-color:var(--error-dim);">Stop</button>
-      <button class="btn-primary btn-full" onclick="resumeTimer()">Resume</button>
+      <button class="btn-primary btn-full" onclick="S.tabataHiit.active ? resumeTabataHiit() : resumeTimer()">Resume</button>
     </div>
   </div>
 </div>
@@ -972,7 +974,46 @@ const S = {
     emomCountFired: 0
   },
   summaryId: null,
-  journalId: null
+  journalId: null,
+  tabataSimple: {
+    warmup: 0, blocks: 1, blockRest: 60, cooldown: 0
+  },
+  hiitSimple: {
+    warmup: 0, work: 20, rest: 10, rounds: 8, cooldown: 0
+  },
+  tabataHiit: {
+    active: false, paused: false,
+    mode: null,
+    phase: null,
+    phaseEndMs: 0,
+    phaseRemaining: 0,
+    startMs: 0,
+    totalPausedMs: 0,
+    pauseStartMs: 0,
+    pauseRafId: null,
+    rafId: null,
+    wakeLock: null,
+    blocks: [],
+    blockIdx: 0,
+    slotIdx: 0,
+    exercises: [],
+    exerciseIdx: 0,
+    currentRound: 1,
+    totalRounds: 0,
+    warmupDuration: 0,
+    cooldownDuration: 0,
+    blockRestDuration: 0,
+    workDuration: 20,
+    restDuration: 10,
+    wod: null,
+    sessionId: null,
+    halfFired: false,
+    fiveCountFired: 0,
+    phaseLapLog: [],
+    currentPhaseStartMs: 0,
+    embeddedInStandard: false,
+    embeddedBlockStartMs: 0
+  }
 };
 
 // ============================================================
@@ -1100,6 +1141,7 @@ function stationLabel(st, exercises, complexes) {
 }
 
 function getStationName(st, exercises, complexes) {
+  if (st.type === 'tabataBlock') return st.tabataBlockName || 'Tabata Block';
   if (st.type === 'complex') {
     const cx = complexes && complexes.find(c => c.id === st.complexId);
     return cx ? cx.name : 'Next station';
@@ -1171,7 +1213,7 @@ function applyTheme() {
 const DB = {
   _db: null,
   async open() {
-    this._db = await idb.openDB('station-db', 2, {
+    this._db = await idb.openDB('station-db', 3, {
       upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains('exercises')) db.createObjectStore('exercises', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('complexes')) db.createObjectStore('complexes', { keyPath: 'id' });
@@ -1179,6 +1221,7 @@ const DB = {
         if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('tags')) db.createObjectStore('tags', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('tabataBlocks')) db.createObjectStore('tabataBlocks', { keyPath: 'id' });
       }
     });
   },
@@ -1816,7 +1859,7 @@ async function renderHome() {
 }
 
 function showAboutModal() {
-  const version = 'v3.5.2';
+  const version = 'v3.6.5';
   showModal(`
   <div style="text-align:center;padding:4px 0 8px;">
     <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:32px;color:var(--text-hi);letter-spacing:0.05em;">STATIONS</div>
@@ -1836,7 +1879,54 @@ function showAboutModal() {
 
     <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-xlo);margin-bottom:16px;">STATIONS ${version}</div>
 
+    <button class="btn-ghost btn-full" onclick="hideModal();setTimeout(()=>showWhatsNewModal(),120)" style="color:var(--bronze);border-color:var(--bronze-dim);margin-bottom:8px;">What's New in v3.6.5 ↗</button>
     <button class="btn-ghost btn-full" onclick="hideModal()">Close</button>
+  </div>`);
+}
+
+function showWhatsNewModal() {
+  const CURRENT_VERSION = 'v3.6.4';
+  DB.put('settings', { id: 'whats-new-seen', version: CURRENT_VERSION });
+
+  showModal(`
+  <div style="padding:4px 0 8px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--bronze);margin-bottom:4px;">STATIONS v3.6.5</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:26px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">What's New</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--bronze) 0%,var(--bronze-dim) 40%,transparent 80%);margin-bottom:16px;"></div>
+
+    <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-lo);margin-bottom:16px;">Since v3.5.2 (what I shared on r/kettlebell initially), a lot has been built and tested.</div>
+
+    <div style="display:flex;flex-direction:column;gap:16px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text-mid);line-height:1.5;">
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">⚡ Tabata + HIIT Timers</div>
+        <div>Two new formats. Simple mode is a pure timer — no setup, just go. Advanced mode uses saved Tabata blocks and logs every session to history with real lap timing.</div>
+        <div style="margin-top:5px;font-size:13px;color:var(--text-lo);">Basically, you can now unsubscribe from your paid HIIT timers. (if you want)</div>
+      </div>
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">🧱 Block Builder</div>
+        <div>Build reusable 8-exercise Tabata blocks in the Exercise Builder. Drop any saved block into a Standard WOD as a station — it runs automatically when you LAP into it.</div>
+      </div>
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">⏱ EMOM Upgraded</div>
+        <div>Format sheet now shows all 4 timer types. EMOM, Tabata, and HIIT WODs get their own badges in the library.</div>
+      </div>
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">🔗 Complex Builder Rebuilt</div>
+        <div>Pick exercises from your library instead of typing names. Weight per movement. Search and filter by equipment.</div>
+      </div>
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">📊 Session History</div>
+        <div>Tabata and HIIT sessions now save to history. Real lap timing — see each block and rest period as separate rows.</div>
+      </div>
+
+    </div>
+
+    <button class="btn-primary btn-full" onclick="hideModal()" style="margin-top:24px;">Let's go →</button>
   </div>`);
 }
 
@@ -1923,6 +2013,7 @@ async function renderExercises() {
   <div class="tab-bar">
     <button class="tab-btn ${tab === 'exercises' ? 'active' : ''}" onclick="S.exTab='exercises';renderExercises()">Exercises</button>
     <button class="tab-btn ${tab === 'complexes' ? 'active' : ''}" onclick="S.exTab='complexes';renderExercises()">Complexes</button>
+    <button class="tab-btn ${tab === 'blocks' ? 'active' : ''}" onclick="S.exTab='blocks';renderExercises()">Blocks</button>
   </div>
 
   <div id="ex-tab-content">
@@ -1930,11 +2021,16 @@ async function renderExercises() {
       <button class="btn-primary btn-full" onclick="openAddExercise()" style="margin-bottom:14px;">+ Add Exercise</button>
       <div class="pill-row">${pillsHtml}</div>
       <div>${exListHtml}</div>
-    ` : `
+    ` : tab === 'complexes' ? `
       <button class="btn-primary btn-full" onclick="openAddComplex()" style="margin-bottom:14px;">+ Add Complex</button>
       <div>${cxListHtml}</div>
+    ` : `
+      <div id="blocks-tab-content">Loading...</div>
     `}
   </div>`;
+  if (tab === 'blocks') {
+    renderBlocksTab();
+  }
 }
 
 function exerciseRowHtml(ex) {
@@ -2146,13 +2242,161 @@ async function confirmDeleteExercise(id) {
 }
 
 function openAddComplex() {
-  showModal(complexModalHtml(null));
+  S._editingComplex = {
+    id: uid(), name: '', isNew: true,
+    movements: [
+      { name: '', reps: 10, exerciseId: null, weight: 0 },
+      { name: '', reps: 10, exerciseId: null, weight: 0 }
+    ]
+  };
+  renderComplexEditor();
 }
 
 async function openEditComplex(id) {
   const cx = await DB.get('complexes', id);
   if (!cx) return;
-  showModal(complexModalHtml(cx));
+  // Migrate old movements to new schema
+  S._editingComplex = {
+    ...cx,
+    isNew: false,
+    movements: (cx.movements || []).map(m => ({
+      name: m.name || '',
+      reps: m.reps || 10,
+      exerciseId: m.exerciseId || null,
+      weight: m.weight || 0
+    }))
+  };
+  renderComplexEditor();
+}
+
+function renderComplexEditor() {
+  const cx = S._editingComplex;
+  if (!cx) return;
+
+  let movHtml = '';
+  cx.movements.forEach((m, i) => {
+    movHtml += `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;" id="cx-mov-${i}">
+      <input type="number" value="${m.reps || 10}" inputmode="numeric" onfocus="this.select()"
+        style="width:52px;text-align:center;flex-shrink:0;padding:8px 4px;"
+        onchange="S._editingComplex.movements[${i}].reps=parseInt(this.value)||10"/>
+      <button onclick="openComplexMovementPicker(${i})"
+        style="flex:1;text-align:left;background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-input);padding:8px 10px;color:${m.name ? 'var(--text-hi)' : 'var(--text-lo)'};font-family:'Barlow Condensed',sans-serif;font-weight:${m.name ? '800' : '500'};font-size:14px;text-transform:uppercase;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        ${m.name ? esc(m.name) : 'Pick exercise'}
+      </button>
+      <input type="number" value="${m.weight || 0}" inputmode="numeric" onfocus="this.select()"
+        placeholder="0" style="width:54px;flex-shrink:0;"
+        onchange="S._editingComplex.movements[${i}].weight=parseFloat(this.value)||0"/>
+      <span style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);flex-shrink:0;">kg</span>
+      <button onclick="removeComplexMovement(${i})" style="background:none;border:none;color:var(--error);font-size:18px;cursor:pointer;padding:4px;flex-shrink:0;min-width:24px;">−</button>
+    </div>`;
+  });
+
+  document.getElementById('screen-exercises').innerHTML = `
+  <div class="nav-header">
+    <div class="nav-back" onclick="S._editingComplex=null;S.exTab='complexes';renderExercises()">← Complexes</div>
+    <div class="nav-title">${cx.isNew ? 'New Complex' : 'Edit Complex'}</div>
+    <div style="width:60px;"></div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:14px;">
+    <label>Complex Name</label>
+    <input type="text" id="cx-name" value="${esc(cx.name)}" placeholder="e.g. KB Devil Press" onfocus="this.select()"
+      onchange="S._editingComplex.name=this.value"/>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);">Movements (${cx.movements.length})</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);">reps · exercise · weight</div>
+  </div>
+
+  ${movHtml}
+
+  <button class="btn-ghost btn-full" onclick="addComplexMovement()" style="margin-bottom:16px;">+ Add Movement</button>
+
+  <div style="display:flex;gap:10px;">
+    <button class="btn-ghost btn-full" onclick="S._editingComplex=null;S.exTab='complexes';renderExercises()">Cancel</button>
+    <button class="btn-primary btn-full" onclick="saveComplex()">Save Complex</button>
+  </div>`;
+}
+
+let _complexPickerFilter = 'all';
+let _complexPickerSearch = '';
+
+async function openComplexMovementPicker(movIdx, filter, search) {
+  _complexPickerFilter = filter !== undefined ? filter : (_complexPickerFilter || 'all');
+  _complexPickerSearch = search !== undefined ? search : (_complexPickerSearch || '');
+
+  const allExercises = await DB.all('exercises');
+  let usable = allExercises.filter(e => e.equipment !== 'cardio' && e.equipment !== 'interval');
+
+  if (_complexPickerFilter !== 'all') {
+    usable = usable.filter(e => e.equipment === _complexPickerFilter);
+  }
+  const q = _complexPickerSearch.toLowerCase().trim();
+  if (q) usable = usable.filter(e => e.name.toLowerCase().includes(q));
+
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const recentlyUsed = usable.filter(e => e.lastUsedAt && (now - e.lastUsedAt) < oneDayMs);
+  const recentIds = new Set(recentlyUsed.map(e => e.id));
+  const frequentlyUsed = usable.filter(e => !recentIds.has(e.id) && (e.useCount || 0) > 0)
+    .sort((a, b) => (b.useCount || 0) - (a.useCount || 0));
+  const freqIds = new Set(frequentlyUsed.map(e => e.id));
+  const alphabetical = usable.filter(e => !recentIds.has(e.id) && !freqIds.has(e.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function buildRow(ex) {
+    const isCurrent = S._editingComplex?.movements[movIdx]?.exerciseId === ex.id;
+    return `<div class="list-item" onclick="selectComplexMovementExercise(${movIdx},'${esc(ex.id)}')" style="cursor:pointer;">
+      <div style="flex:1;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;">${esc(ex.name)}</div>
+      ${isCurrent ? `<span style="color:var(--yellow);font-size:14px;">✓</span>` : ''}
+    </div>`;
+  }
+
+  function buildSect(title, items) {
+    if (!items.length) return '';
+    return `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:0.25em;color:var(--text-xlo);padding:10px 0 4px;">${title}</div>${items.map(buildRow).join('')}`;
+  }
+
+  const listHtml = usable.length === 0
+    ? `<div style="text-align:center;padding:20px;color:var(--text-lo);font-family:'DM Sans',sans-serif;font-size:13px;">No exercises found</div>`
+    : buildSect('Recently Used', recentlyUsed) + buildSect('Frequently Used', frequentlyUsed) + buildSect('All Exercises', alphabetical);
+
+  const equipments = ['all', 'kettlebell', 'dumbbell', 'barbell', 'bodyweight', 'medicine_ball', 'sandbag', 'trx'];
+  const pillsHtml = equipments.map(eq =>
+    `<div class="pill ${_complexPickerFilter === eq ? 'active' : ''}" onclick="openComplexMovementPicker(${movIdx},'${eq}',document.getElementById('cx-picker-search')?.value||'')" style="font-size:11px;padding:3px 8px;">${eq === 'all' ? 'All' : eqLabel(eq)}</div>`
+  ).join('');
+
+  showModal(`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Movement ${movIdx + 1}</div>
+    <button class="btn-ghost btn-sm" onclick="hideModal();_complexPickerFilter='all';_complexPickerSearch='';" style="min-width:36px;width:36px;padding:0;">✕</button>
+  </div>
+  <input type="text" id="cx-picker-search" value="${esc(_complexPickerSearch)}" placeholder="Search exercises..."
+    style="margin-bottom:8px;" oninput="openComplexMovementPicker(${movIdx},'${_complexPickerFilter}',this.value)" onfocus="this.select()"/>
+  <div class="pill-row" style="flex-wrap:wrap;margin-bottom:6px;">${pillsHtml}</div>
+  <div style="max-height:50vh;overflow-y:auto;">${listHtml}</div>`);
+}
+
+function selectComplexMovementExercise(movIdx, exerciseId) {
+  if (!S._editingComplex) return;
+  const mov = S._editingComplex.movements[movIdx];
+  if (!mov) return;
+  mov.exerciseId = exerciseId;
+  mov.weight = mov.weight || 0;
+  _complexPickerFilter = 'all';
+  _complexPickerSearch = '';
+  hideModal();
+  DB.get('exercises', exerciseId).then(ex => {
+    if (ex && S._editingComplex?.movements[movIdx]) {
+      ex.lastUsedAt = Date.now();
+      S._editingComplex.movements[movIdx].name = ex.name;
+      S._editingComplex.movements[movIdx].weight = mov.weight || ex.defaultWeight || 0;
+      DB.put('exercises', ex);
+    }
+    renderComplexEditor();
+  });
 }
 
 function complexModalHtml(cx) {
@@ -2189,55 +2433,40 @@ function complexMovementRowHtml(m, i) {
 }
 
 function addComplexMovement() {
-  const wrap = document.getElementById('cx-movements');
-  if (!wrap) return;
-  const idx = wrap.querySelectorAll('.movement-item').length;
-  const div = document.createElement('div');
-  div.innerHTML = complexMovementRowHtml({ name: '', reps: 10 }, idx);
-  wrap.appendChild(div.firstElementChild);
+  if (!S._editingComplex) return;
+  S._editingComplex.movements.push({ name: '', reps: 10, exerciseId: null, weight: 0 });
+  renderComplexEditor();
 }
 
 function removeComplexMovement(idx) {
-  const el = document.getElementById('cx-mov-' + idx);
-  if (el) {
-    const wrap = document.getElementById('cx-movements');
-    if (wrap && wrap.querySelectorAll('.movement-item').length > 2) {
-      el.remove();
-    } else {
-      toast('Minimum 2 movements required');
-    }
-  }
+  if (!S._editingComplex) return;
+  if (S._editingComplex.movements.length <= 2) { toast('Minimum 2 movements required'); return; }
+  S._editingComplex.movements.splice(idx, 1);
+  renderComplexEditor();
 }
 
-async function saveComplex(editId) {
-  const name = (document.getElementById('cx-name').value || '').trim();
+async function saveComplex() {
+  const cx = S._editingComplex;
+  if (!cx) return;
+  const name = (document.getElementById('cx-name')?.value || cx.name || '').trim();
   if (!name) { toast('Please enter a name'); return; }
-  const wrap = document.getElementById('cx-movements');
-  const rows = wrap ? wrap.querySelectorAll('.movement-item') : [];
-  const movements = [];
-  rows.forEach((row, i) => {
-    const repsEl = document.getElementById('cx-mov-reps-' + i);
-    const nameEl = document.getElementById('cx-mov-name-' + i);
-    if (repsEl && nameEl) {
-      const movName = (nameEl.value || '').trim();
-      const movReps = parseInt(repsEl.value) || 10;
-      if (movName) movements.push({ name: movName, reps: movReps });
-    }
-  });
+  const movements = cx.movements.filter(m => m.name.trim());
   if (movements.length < 2) { toast('Add at least 2 movements'); return; }
 
-  if (editId) {
-    const cx = await DB.get('complexes', editId);
-    if (!cx) return;
-    Object.assign(cx, { name, movements });
-    await DB.put('complexes', cx);
-    toast('Complex updated');
-  } else {
-    const cx = { id: uid(), name, movements, isPrebuilt: false };
-    await DB.put('complexes', cx);
-    toast('Complex added');
+  // Write back weights to exercise defaultWeight
+  for (const m of movements) {
+    if (m.exerciseId && m.weight > 0) {
+      DB.get('exercises', m.exerciseId).then(ex => {
+        if (ex) { ex.defaultWeight = m.weight; DB.put('exercises', ex); }
+      });
+    }
   }
-  hideModal();
+
+  const toSave = { id: cx.id, name, movements, isPrebuilt: cx.isPrebuilt || false };
+  await DB.put('complexes', toSave);
+  toast(cx.isNew ? 'Complex added' : 'Complex updated');
+  S._editingComplex = null;
+  S.exTab = 'complexes';
   await renderExercises();
 }
 
@@ -2260,6 +2489,254 @@ async function confirmDeleteComplex(id) {
   hideModal();
   toast('Complex deleted');
   await renderExercises();
+}
+
+// ============================================================
+// BLOCK BUILDER
+// ============================================================
+async function renderBlocksTab() {
+  const blocks = await DB.all('tabataBlocks');
+  const container = document.getElementById('blocks-tab-content');
+  if (!container) return;
+
+  let listHtml = '';
+  if (blocks.length === 0) {
+    listHtml = `<div style="text-align:center;padding:32px 0;color:var(--text-lo);font-family:'DM Sans',sans-serif;font-size:14px;">No blocks yet. Create your first Tabata block.</div>`;
+  } else {
+    for (const blk of blocks) {
+      const filledSlots = (blk.slots || []).filter(s => s.exerciseId).length;
+      listHtml += `
+      <div class="list-item" style="flex-direction:column;align-items:stretch;padding:12px 16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;color:var(--text-hi);">${esc(blk.name)}</div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn-sm btn-ghost" onclick="event.stopPropagation();openEditBlock('${esc(blk.id)}')" style="min-width:36px;width:36px;padding:0;">${icons.pencil}</button>
+            <button class="btn-sm btn-ghost" onclick="event.stopPropagation();deleteBlock('${esc(blk.id)}')" style="min-width:36px;width:36px;padding:0;color:var(--error);">${icons.trash}</button>
+          </div>
+        </div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">${filledSlots} of 8 exercises · 4:00</div>
+      </div>`;
+    }
+  }
+
+  container.innerHTML = `
+  <button class="btn-primary btn-full" onclick="openNewBlock()" style="margin-bottom:14px;">+ New Block</button>
+  <div>${listHtml}</div>`;
+}
+
+function openNewBlock() {
+  S._editingBlock = { id: uid(), name: '', slots: Array(8).fill(null).map(() => ({ exerciseId: null, weight: 0 })), isNew: true };
+  renderBlockEditor();
+  showScreen('exercises');
+}
+
+async function openEditBlock(id) {
+  const blk = await DB.get('tabataBlocks', id);
+  if (!blk) return;
+  while (blk.slots.length < 8) blk.slots.push({ exerciseId: null, weight: 0 });
+  S._editingBlock = { ...blk, isNew: false };
+  renderBlockEditor();
+}
+
+async function renderBlockEditor() {
+  const blk = S._editingBlock;
+  if (!blk) return;
+  const exercises = await DB.all('exercises');
+  const usable = exercises.filter(e => e.equipment !== 'cardio' && e.equipment !== 'interval');
+  const filledCount = blk.slots.filter(s => s.exerciseId).length;
+
+  let slotsHtml = '';
+  for (let i = 0; i < 8; i++) {
+    const slot = blk.slots[i];
+    const ex = slot.exerciseId ? usable.find(e => e.id === slot.exerciseId) : null;
+    slotsHtml += `
+    <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:16px;color:var(--text-lo);min-width:20px;">${i + 1}</div>
+      <div style="flex:1;min-width:0;">
+        ${ex ? `
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);">${esc(ex.name)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+          <input type="number" value="${slot.weight || ''}" inputmode="numeric" placeholder="0 kg"
+            style="width:70px;" onfocus="this.select()"
+            onchange="S._editingBlock.slots[${i}].weight=parseFloat(this.value)||0"/>
+          <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">kg</span>
+        </div>` : `
+        <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-lo);">Empty</div>`}
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn-sm btn-ghost" onclick="openBlockSlotPicker(${i})" style="font-size:12px;padding:0 8px;">${ex ? 'Change' : '+ Add'}</button>
+        ${ex ? `<button class="btn-sm btn-ghost" onclick="S._editingBlock.slots[${i}]={exerciseId:null,weight:0};renderBlockEditor()" style="min-width:28px;width:28px;padding:0;color:var(--error);">✕</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('screen-exercises').innerHTML = `
+  <div class="nav-header">
+    <div class="nav-back" onclick="S._editingBlock=null;S.exTab='blocks';renderExercises()">← Blocks</div>
+    <div class="nav-title">${blk.isNew ? 'New Block' : 'Edit Block'}</div>
+    <div style="width:60px;"></div>
+  </div>
+
+  <div class="form-row">
+    <label>Block Name</label>
+    <input type="text" value="${esc(blk.name)}" placeholder="e.g. Upper Body A" onfocus="this.select()"
+      onchange="S._editingBlock.name=this.value"/>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);">Exercises (${filledCount} of 8)</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">20s work · 10s rest each = 4:00</div>
+  </div>
+
+  ${slotsHtml}
+
+  <div style="display:flex;gap:10px;margin-top:16px;">
+    <button class="btn-ghost btn-full" onclick="S._editingBlock=null;S.exTab='blocks';renderExercises()">Cancel</button>
+    <button class="btn-primary btn-full" onclick="saveBlock()">Save Block</button>
+  </div>`;
+}
+
+let _blockSlotPickerFilter = 'all';
+let _blockSlotPickerSearch = '';
+
+async function openBlockSlotPicker(slotIdx, filter, search) {
+  _blockSlotPickerFilter = filter !== undefined ? filter : (_blockSlotPickerFilter || 'all');
+  _blockSlotPickerSearch = search !== undefined ? search : (_blockSlotPickerSearch || '');
+
+  const allExercises = await DB.all('exercises');
+  let usable = allExercises.filter(e => e.equipment !== 'cardio' && e.equipment !== 'interval');
+
+  if (_blockSlotPickerFilter !== 'all') {
+    usable = usable.filter(e => e.equipment === _blockSlotPickerFilter);
+  }
+
+  const q = _blockSlotPickerSearch.toLowerCase().trim();
+  if (q) {
+    usable = usable.filter(e => e.name.toLowerCase().includes(q));
+  }
+
+  const blk = S._editingBlock;
+  const filledCount = blk.slots.filter(s => s.exerciseId).length;
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  const recentlyUsed = usable.filter(e => e.lastUsedAt && (now - e.lastUsedAt) < oneDayMs);
+  const recentIds = new Set(recentlyUsed.map(e => e.id));
+  const frequentlyUsed = usable.filter(e => !recentIds.has(e.id) && (e.useCount || 0) > 0)
+    .sort((a, b) => (b.useCount || 0) - (a.useCount || 0));
+  const freqIds = new Set(frequentlyUsed.map(e => e.id));
+  const alphabetical = usable.filter(e => !recentIds.has(e.id) && !freqIds.has(e.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function buildExRow(ex) {
+    const alreadyInSlot = blk.slots[slotIdx]?.exerciseId === ex.id;
+    const usedElsewhere = blk.slots.some((s, i) => i !== slotIdx && s.exerciseId === ex.id);
+    const blocked = filledCount >= 8 && !blk.slots[slotIdx].exerciseId;
+    return `
+    <div class="list-item" onclick="${blocked ? 'toast(\'8 exercises are already in this block\')' : `selectBlockSlotExercise(${slotIdx},'${esc(ex.id)}')`}" style="cursor:pointer;${usedElsewhere ? 'opacity:0.5;' : ''}">
+      <div style="flex:1;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;">${esc(ex.name)}</div>
+      </div>
+      ${alreadyInSlot ? `<span style="color:var(--yellow);font-size:14px;">✓</span>` : ''}
+    </div>`;
+  }
+
+  function buildSection(title, items) {
+    if (items.length === 0) return '';
+    return `
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:0.25em;color:var(--text-xlo);padding:10px 0 4px;">${title}</div>
+    ${items.map(buildExRow).join('')}`;
+  }
+
+  let listHtml = '';
+  if (usable.length === 0) {
+    listHtml = `<div style="text-align:center;padding:20px;color:var(--text-lo);font-family:'DM Sans',sans-serif;font-size:13px;">No exercises found</div>`;
+  } else {
+    listHtml = buildSection('Recently Used', recentlyUsed)
+      + buildSection('Frequently Used', frequentlyUsed)
+      + buildSection('All Exercises', alphabetical);
+  }
+
+  const equipments = ['all', 'kettlebell', 'dumbbell', 'barbell', 'bodyweight', 'medicine_ball', 'sandbag', 'trx'];
+  const pillsHtml = equipments.map(eq =>
+    `<div class="pill ${_blockSlotPickerFilter === eq ? 'active' : ''}" onclick="openBlockSlotPicker(${slotIdx},'${eq}',document.getElementById('block-slot-search')?.value||'')" style="font-size:11px;padding:3px 8px;">${eq === 'all' ? 'All' : eqLabel(eq)}</div>`
+  ).join('');
+
+  showModal(`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Slot ${slotIdx + 1}</div>
+    <button class="btn-ghost btn-sm" onclick="hideModal();_blockSlotPickerFilter='all';_blockSlotPickerSearch='';" style="min-width:36px;width:36px;padding:0;">✕</button>
+  </div>
+  <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-bottom:8px;">${filledCount} of 8 selected</div>
+  <input type="text" id="block-slot-search" value="${esc(_blockSlotPickerSearch)}" placeholder="Search exercises..." style="margin-bottom:8px;"
+    oninput="openBlockSlotPicker(${slotIdx},'${_blockSlotPickerFilter}',this.value)" onfocus="this.select()"/>
+  <div class="pill-row" style="flex-wrap:wrap;margin-bottom:6px;">${pillsHtml}</div>
+  <div style="max-height:50vh;overflow-y:auto;">${listHtml}</div>`);
+}
+
+function selectBlockSlotExercise(slotIdx, exerciseId) {
+  if (!S._editingBlock) return;
+  const alreadyFilled = S._editingBlock.slots.filter(s => s.exerciseId).length;
+  const currentSlotEmpty = !S._editingBlock.slots[slotIdx].exerciseId;
+  if (alreadyFilled >= 8 && currentSlotEmpty) {
+    toast('8 exercises are already in this block');
+    return;
+  }
+  // Set slot with placeholder weight, then async pre-fill from defaultWeight
+  S._editingBlock.slots[slotIdx] = { exerciseId, weight: 0 };
+  _blockSlotPickerFilter = 'all';
+  _blockSlotPickerSearch = '';
+  hideModal();
+  DB.get('exercises', exerciseId).then(ex => {
+    if (ex) {
+      ex.lastUsedAt = Date.now();
+      if (!S._editingBlock.slots[slotIdx]) return;
+      S._editingBlock.slots[slotIdx].weight = ex.defaultWeight || 0;
+      DB.put('exercises', ex);
+    }
+    renderBlockEditor();
+  });
+}
+
+async function saveBlock() {
+  const blk = S._editingBlock;
+  if (!blk) return;
+  const name = (document.querySelector('#screen-exercises input[placeholder="e.g. Upper Body A"]')?.value || blk.name || '').trim();
+  if (!name) { toast('Name your block'); return; }
+  blk.name = name;
+  const { isNew, ...toSave } = blk;
+  await DB.put('tabataBlocks', toSave);
+  // Write back weights to exercise defaultWeight
+  for (const slot of blk.slots) {
+    if (slot.exerciseId && slot.weight > 0) {
+      DB.get('exercises', slot.exerciseId).then(ex => {
+        if (ex) { ex.defaultWeight = slot.weight; DB.put('exercises', ex); }
+      });
+    }
+  }
+  S._editingBlock = null;
+  toast('Block saved');
+  S.exTab = 'blocks';
+  renderExercises();
+}
+
+function deleteBlock(id) {
+  showModal(`
+  <div style="text-align:center;padding:8px 0;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;margin-bottom:12px;">Delete Block?</div>
+    <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);margin-bottom:20px;font-size:15px;">This block will be removed from the library.</div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+      <button class="btn-danger btn-full" onclick="confirmDeleteBlock('${esc(id)}')">Delete</button>
+    </div>
+  </div>`);
+}
+
+async function confirmDeleteBlock(id) {
+  await DB.del('tabataBlocks', id);
+  hideModal();
+  toast('Block deleted');
+  renderBlocksTab();
 }
 
 // ============================================================
@@ -2519,9 +2996,11 @@ async function stationBuilderHtml(st, idx, exercises, complexes, total) {
       </div>` : ''}
       `;
     }
+  } else if (st.type === 'tabataBlock') {
+    typeLabel = `<span style="color:var(--yellow);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:13px;">TABATA BLOCK · 4:00</span>`;
   }
 
-  const stName = ex ? ex.name : (cx ? cx.name : 'Station');
+  const stName = ex ? ex.name : (cx ? cx.name : (st.type === 'tabataBlock' ? st.tabataBlockName || 'Tabata Block' : 'Station'));
   const upBtn = `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();moveStation(${idx},-1)" style="min-width:32px;width:32px;padding:0;height:32px;min-height:32px;${idx === 0 ? 'opacity:0;pointer-events:none;' : ''}">↑</button>`;
   const downBtn = `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();moveStation(${idx},1)" style="min-width:32px;width:32px;padding:0;height:32px;min-height:32px;${idx === total-1 ? 'opacity:0;pointer-events:none;' : ''}">↓</button>`;
   const dupBtn = `<button class="btn-sm btn-ghost" onclick="event.stopPropagation();duplicateStation(${idx})" style="min-width:32px;width:32px;padding:0;height:32px;min-height:32px;" title="Duplicate">⧉</button>`;
@@ -2611,7 +3090,52 @@ function openAddStationSheet() {
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('exercise')">Exercise</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('complex')">Complex</button>
     <button class="btn-ghost btn-full" onclick="openStationPickerSheet('interval')" style="color:var(--interval);border-color:rgba(100,160,255,0.4);">&#x23F1; Interval / Rest</button>
+    <button class="btn-ghost btn-full" onclick="openTabataBlockPickerSheet()" style="color:var(--yellow);border-color:rgba(212,224,0,0.3);">⚡ Tabata Block</button>
   </div>`);
+}
+
+async function openTabataBlockPickerSheet() {
+  const blocks = await DB.all('tabataBlocks');
+  hideSheet();
+  if (blocks.length === 0) {
+    showModal(`
+    <div style="text-align:center;padding:8px 0;">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;margin-bottom:12px;">No Blocks Yet</div>
+      <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);margin-bottom:20px;font-size:14px;">Build a Tabata Block in Exercise Builder → Blocks tab first.</div>
+      <button class="btn-primary btn-full" onclick="hideModal();nav('exercises')">Go to Exercise Builder</button>
+      <button class="btn-ghost btn-full" onclick="hideModal()" style="margin-top:8px;">Cancel</button>
+    </div>`);
+    return;
+  }
+
+  let listHtml = blocks.map(blk => {
+    const filled = blk.slots.filter(s => s.exerciseId).length;
+    return `
+    <div class="list-item" onclick="addTabataBlockStation('${esc(blk.id)}','${esc(blk.name)}')" style="cursor:pointer;">
+      <div style="flex:1;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);">${esc(blk.name)}</div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-top:2px;">${filled} exercises · 4:00</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  showModal(`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Add Tabata Block</div>
+    <button class="btn-ghost btn-sm" onclick="hideModal()" style="min-width:36px;width:36px;padding:0;">✕</button>
+  </div>
+  <div>${listHtml}</div>`);
+}
+
+function addTabataBlockStation(blockId, blockName) {
+  const newStation = {
+    id: uid(), type: 'tabataBlock', tabataBlockId: blockId,
+    tabataBlockName: blockName, notes: '', _expanded: false
+  };
+  S.wodBuilder.stations.push(newStation);
+  hideModal();
+  renderWodBuilder();
+  toast('Tabata Block added');
 }
 
 async function openStationPickerSheet(type) {
@@ -3011,8 +3535,12 @@ async function renderWodLibrary() {
   // Apply WOD type filter
   if (S.libraryWodFilter === 'emom') {
     filteredWods = filteredWods.filter(w => w.emomMode === true);
-  } else if (S.libraryWodFilter === 'standard') {
-    filteredWods = filteredWods.filter(w => !w.emomMode);
+  } else if (S.libraryWodFilter === 'tabata') {
+    filteredWods = filteredWods.filter(w => w.tabataMode === true);
+  } else if (S.libraryWodFilter === 'hiit') {
+    filteredWods = filteredWods.filter(w => w.hiitMode === true);
+  } else if (S.libraryWodFilter === 'stations') {
+    filteredWods = filteredWods.filter(w => !w.emomMode && !w.tabataMode && !w.hiitMode);
   }
 
   const tagFilterPills = [
@@ -3040,6 +3568,12 @@ async function renderWodLibrary() {
     const emomBadge = wod.emomMode
       ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--bronze);padding:2px 6px;border:1px solid var(--bronze-dim);border-radius:2px;">EMOM</span>`
       : '';
+    const tabataBadge = wod.tabataMode
+      ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--yellow);padding:2px 6px;border:1px solid rgba(212,224,0,0.3);border-radius:2px;">TABATA</span>`
+      : '';
+    const hiitBadge = wod.hiitMode
+      ? `<span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--interval);padding:2px 6px;border:1px solid rgba(100,160,255,0.3);border-radius:2px;">HIIT</span>`
+      : '';
     const expandedContent = isExpanded ? `
     <div style="padding:12px 16px;border-top:1px solid var(--rule);">
       <div style="display:flex;gap:8px;margin-bottom:10px;">
@@ -3048,7 +3582,7 @@ async function renderWodLibrary() {
         <button class="btn-ghost btn-sm flex1" onclick="event.stopPropagation();exportWod('${esc(wod.id)}')">Export</button>
         ${!wod.isPrebuilt ? `<button class="btn-ghost btn-sm" onclick="event.stopPropagation();confirmDeleteWod('${esc(wod.id)}','${esc(wod.name)}')" style="min-width:36px;width:36px;padding:0;color:var(--error);border-color:var(--error-dim);">${icons.trash}</button>` : ''}
       </div>
-      <button class="btn-primary btn-full" onclick="event.stopPropagation();startLibraryWod('${esc(wod.id)}')">${icons.play} Start</button>
+      <button class="btn-primary btn-full" onclick="event.stopPropagation();${wod.tabataMode ? `startTabataAdvancedWod('${esc(wod.id)}')` : wod.hiitMode ? `startHiitAdvancedWod('${esc(wod.id)}')` : `startLibraryWod('${esc(wod.id)}')`}">${icons.play} Start</button>
     </div>` : '';
 
     listHtml += `
@@ -3061,6 +3595,8 @@ async function renderWodLibrary() {
             <span style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);">${stCount} station${stCount!==1?'s':''}</span>
             ${prebuiltBadge}
             ${emomBadge}
+            ${tabataBadge}
+            ${hiitBadge}
             ${tagPills}
           </div>
         </div>
@@ -3090,10 +3626,12 @@ async function renderWodLibrary() {
     <div class="header-rule"></div>
   </div>
 
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
     <div class="pill ${S.libraryWodFilter==='all'?'active':''}" onclick="setLibraryWodFilter('all')">All</div>
-    <div class="pill ${S.libraryWodFilter==='standard'?'active':''}" onclick="setLibraryWodFilter('standard')">Standard</div>
+    <div class="pill ${S.libraryWodFilter==='stations'?'active':''}" onclick="setLibraryWodFilter('stations')">STATIONS</div>
     <div class="pill ${S.libraryWodFilter==='emom'?'active':''}" onclick="setLibraryWodFilter('emom')">EMOM</div>
+    <div class="pill ${S.libraryWodFilter==='tabata'?'active':''}" onclick="setLibraryWodFilter('tabata')">Tabata</div>
+    <div class="pill ${S.libraryWodFilter==='hiit'?'active':''}" onclick="setLibraryWodFilter('hiit')">HIIT</div>
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
     <button class="btn-ghost btn-sm" onclick="openTagFilterModal()" style="color:${activeFilters.length > 0 ? 'var(--yellow)' : 'var(--text-mid)'};border-color:${activeFilters.length > 0 ? 'rgba(212,224,0,0.3)' : 'var(--rule)'};">&#127991; Filter${activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}</button>
@@ -3135,25 +3673,54 @@ function openNewWodSheet() {
   </div>
 
   <div style="display:flex;flex-direction:column;gap:10px;">
-    <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:16px;cursor:pointer;" onclick="hideSheet();nav('wod-builder',{fresh:true,emom:false})">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="background:var(--bg-lift);border:1px solid rgba(184,118,42,0.2);border-radius:var(--radius-card);padding:14px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();nav('wod-builder',{fresh:true,emom:false})">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--bronze);"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
         <div>
-          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Standard</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:3px;">STATIONS</div>
           <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Station-by-station. Press LAP to advance.</div>
         </div>
         <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
       </div>
     </div>
 
-    <div style="background:var(--bg-lift);border:1px solid rgba(184,118,42,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();openEmomSetupModal()">
-      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--bronze);"></div>
+    <div style="background:var(--bg-lift);border:1px solid rgba(126,115,103,0.3);border-radius:var(--radius-card);padding:14px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();openEmomSetupModal()">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--text-mid);opacity:0.6;"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
         <div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
             <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);">EMOM</div>
             <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--bronze);padding:2px 6px;border:1px solid var(--bronze-dim);border-radius:2px;">Every Minute</span>
           </div>
           <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Timed rounds. Auto-advances each interval.</div>
+        </div>
+        <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg-lift);border:1px solid rgba(212,224,0,0.15);border-radius:var(--radius-card);padding:14px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();openTabataSetupModal()">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--yellow);"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);">Tabata</div>
+            <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--yellow);padding:2px 6px;border:1px solid rgba(212,224,0,0.3);border-radius:2px;">20s / 10s</span>
+          </div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">8-exercise blocks. Simple or advanced.</div>
+        </div>
+        <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg-lift);border:1px solid rgba(100,160,255,0.15);border-radius:var(--radius-card);padding:14px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideSheet();openHiitSetupModal()">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--interval);"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-left:8px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);">HIIT</div>
+            <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--interval);padding:2px 6px;border:1px solid rgba(100,160,255,0.3);border-radius:2px;">Custom Intervals</span>
+          </div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Custom work/rest. Any number of rounds.</div>
         </div>
         <div style="color:var(--text-lo);font-size:20px;padding-left:12px;">›</div>
       </div>
@@ -3212,6 +3779,1136 @@ function openEmomConfigModal() {
     <button class="pill ${dur===120?'active':''}" onclick="S.wodBuilder.emomDuration=120;hideModal();renderWodBuilder()">120s</button>
   </div>
   <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>`);
+}
+
+// ============================================================
+// TABATA MODE
+// ============================================================
+
+function openTabataSetupModal() {
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--yellow);margin-bottom:5px;">New Workout</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;text-transform:uppercase;color:var(--text-hi);">Tabata</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--yellow) 0%,rgba(212,224,0,0.3) 50%,transparent 100%);margin-top:8px;margin-bottom:20px;"></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:16px;cursor:pointer;" onclick="hideModal();openTabataSimpleSetup()">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Simple</div>
+      <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Pure timer. No exercise names. No saving.</div>
+    </div>
+    <div style="background:var(--bg-lift);border:1px solid rgba(212,224,0,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideModal();openTabataAdvancedSetup()">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--yellow);"></div>
+      <div style="padding-left:8px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Advanced</div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Use your saved blocks. Save to library.</div>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:16px;">
+    <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+  </div>`);
+}
+
+function openTabataSimpleSetup() {
+  const ts = S.tabataSimple;
+  const warmupOptions = [
+    { v: 0, l: 'Off' }, { v: 180, l: '3 min' }, { v: 300, l: '5 min' }, { v: -1, l: 'Custom' }
+  ];
+  const cooldownOptions = [
+    { v: 0, l: 'Off' }, { v: 180, l: '3 min' }, { v: 300, l: '5 min' }, { v: -1, l: 'Custom' }
+  ];
+  const restOptions = [
+    { v: 60, l: '60s' }, { v: 90, l: '90s' }, { v: 120, l: '120s' }, { v: 180, l: '180s' }, { v: -1, l: 'Custom' }
+  ];
+
+  const warmupCustom = !warmupOptions.some(o => o.v === ts.warmup && o.v !== -1);
+  const cooldownCustom = !cooldownOptions.some(o => o.v === ts.cooldown && o.v !== -1);
+  const restCustom = !restOptions.some(o => o.v === ts.blockRest && o.v !== -1);
+
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Tabata Simple</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--yellow) 0%,transparent 60%);margin-top:8px;margin-bottom:16px;"></div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Warmup</label>
+    <div class="pill-row" style="margin-bottom:${warmupCustom ? '6px' : '0'};">
+      ${warmupOptions.map(o => `<button class="pill ${(!warmupCustom && ts.warmup === o.v) || (warmupCustom && o.v === -1) ? 'active' : ''}" onclick="S.tabataSimple.warmup=${o.v};openTabataSimpleSetup()">${o.l}</button>`).join('')}
+    </div>
+    ${warmupCustom ? `<input type="number" value="${ts.warmup}" inputmode="numeric" placeholder="seconds" style="width:80px;" onchange="S.tabataSimple.warmup=parseInt(this.value)||0"/>` : ''}
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Blocks</label>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+      <button class="btn-ghost btn-sm" onclick="S.tabataSimple.blocks=Math.max(1,S.tabataSimple.blocks-1);openTabataSimpleSetup()" style="min-width:36px;width:36px;height:36px;min-height:36px;font-size:18px;padding:0;">−</button>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:32px;color:var(--text-hi);min-width:40px;text-align:center;">${ts.blocks}</div>
+      <button class="btn-ghost btn-sm" onclick="S.tabataSimple.blocks++;openTabataSimpleSetup()" style="min-width:36px;width:36px;height:36px;min-height:36px;font-size:18px;padding:0;">+</button>
+    </div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-top:6px;">${ts.blocks} block${ts.blocks !== 1 ? 's' : ''} × 4:00 = ${fmtMM(ts.blocks * 240)}</div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Rest Between Blocks</label>
+    <div class="pill-row" style="margin-bottom:${restCustom ? '6px' : '0'};">
+      ${restOptions.map(o => `<button class="pill ${(!restCustom && ts.blockRest === o.v) || (restCustom && o.v === -1) ? 'active' : ''}" onclick="S.tabataSimple.blockRest=${o.v};openTabataSimpleSetup()">${o.l}</button>`).join('')}
+    </div>
+    ${restCustom ? `<input type="number" value="${ts.blockRest}" inputmode="numeric" placeholder="seconds" style="width:80px;" onchange="S.tabataSimple.blockRest=parseInt(this.value)||60"/>` : ''}
+  </div>
+
+  <div class="form-row" style="margin-bottom:16px;">
+    <label>Cooldown</label>
+    <div class="pill-row" style="margin-bottom:${cooldownCustom ? '6px' : '0'};">
+      ${cooldownOptions.map(o => `<button class="pill ${(!cooldownCustom && ts.cooldown === o.v) || (cooldownCustom && o.v === -1) ? 'active' : ''}" onclick="S.tabataSimple.cooldown=${o.v};openTabataSimpleSetup()">${o.l}</button>`).join('')}
+    </div>
+    ${cooldownCustom ? `<input type="number" value="${ts.cooldown}" inputmode="numeric" placeholder="seconds" style="width:80px;" onchange="S.tabataSimple.cooldown=parseInt(this.value)||0"/>` : ''}
+  </div>
+
+  <button class="btn-primary btn-full" onclick="saveTabataSimpleSettings();hideModal();startTabataSimple()">Start</button>
+  <button class="btn-ghost btn-full" onclick="hideModal()" style="margin-top:8px;">Cancel</button>`);
+}
+
+function saveTabataSimpleSettings() {
+  DB.put('settings', { id: 'tabata-simple-last', ...S.tabataSimple });
+}
+
+async function loadTabataSimpleSettings() {
+  const saved = await DB.get('settings', 'tabata-simple-last');
+  if (saved) {
+    S.tabataSimple.warmup = saved.warmup || 0;
+    S.tabataSimple.blocks = saved.blocks || 1;
+    S.tabataSimple.blockRest = saved.blockRest || 60;
+    S.tabataSimple.cooldown = saved.cooldown || 0;
+  }
+}
+
+function startTabataSimple() {
+  const ts = S.tabataSimple;
+  const th = S.tabataHiit;
+  th.mode = 'tabata-simple';
+  th.active = false;
+  th.paused = false;
+  th.startMs = 0;
+  th.totalPausedMs = 0;
+  th.pauseStartMs = 0;
+  th.sessionId = uid();
+  th.wod = null;
+  th.blocks = Array(ts.blocks).fill(null).map((_, i) => ({ name: `Block ${i + 1}`, slots: [] }));
+  th.blockIdx = 0;
+  th.slotIdx = 0;
+  th.warmupDuration = ts.warmup;
+  th.cooldownDuration = ts.cooldown;
+  th.blockRestDuration = ts.blockRest;
+  th.workDuration = 20;
+  th.restDuration = 10;
+  th.currentRound = 1;
+  th.totalRounds = ts.blocks;
+  th.halfFired = false;
+  th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  showScreen('timer');
+
+  if (ts.warmup > 0) {
+    startTabataHiitPhase('warmup', ts.warmup);
+  } else {
+    th.blockIdx = 0;
+    th.slotIdx = 0;
+    startTabataHiitPhase('work', 20);
+  }
+}
+
+async function openTabataAdvancedSetup() {
+  const blocks = await DB.all('tabataBlocks');
+  const ts = S.tabataSimple;
+
+  let blockListHtml = '';
+  if (blocks.length === 0) {
+    blockListHtml = `<div style="text-align:center;padding:16px;color:var(--text-lo);font-family:'DM Sans',sans-serif;font-size:13px;">No blocks yet. Build one in Exercise Builder → Blocks tab.</div>`;
+  } else {
+    for (const blk of blocks) {
+      const filled = blk.slots.filter(s => s.exerciseId).length;
+      blockListHtml += `
+      <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer;" onclick="addTabataAdvancedBlock('${esc(blk.id)}')">
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;color:var(--text-hi);">${esc(blk.name)}</div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-top:2px;">${filled} exercises · 4:00</div>
+        </div>
+        <div style="color:var(--text-lo);font-size:18px;">+</div>
+      </div>`;
+    }
+  }
+
+  if (!S._tabataAdvancedBlocks) S._tabataAdvancedBlocks = [];
+  if (!S._tabataAdvancedName) S._tabataAdvancedName = `Tabata · ${todayStr()}`;
+  if (!S._tabataAdvancedBlockRest) S._tabataAdvancedBlockRest = 60;
+  if (!S._tabataAdvancedWarmup) S._tabataAdvancedWarmup = 0;
+  if (!S._tabataAdvancedCooldown) S._tabataAdvancedCooldown = 0;
+
+  const addedHtml = S._tabataAdvancedBlocks.length > 0
+    ? S._tabataAdvancedBlocks.map((b, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--rule);">
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:14px;color:var(--text-lo);min-width:16px;">${i + 1}</span>
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;flex:1;color:var(--text-hi);">${esc(b.name)}</span>
+        <button onclick="S._tabataAdvancedBlocks.splice(${i},1);openTabataAdvancedSetup()" style="background:none;border:none;color:var(--error);cursor:pointer;padding:4px;">✕</button>
+      </div>`).join('')
+    : `<div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-lo);padding:8px 0;">No blocks added yet.</div>`;
+
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Tabata Advanced</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--yellow) 0%,transparent 60%);margin-top:8px;margin-bottom:16px;"></div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Name</label>
+    <input type="text" id="tabata-adv-name" value="${esc(S._tabataAdvancedName)}" onfocus="this.select()" onchange="S._tabataAdvancedName=this.value"/>
+  </div>
+
+  <div style="margin-bottom:12px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:8px;">Your Blocks</div>
+    ${addedHtml}
+  </div>
+
+  <div style="margin-bottom:12px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:8px;">Add Block</div>
+    <div style="max-height:160px;overflow-y:auto;">${blockListHtml}</div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Rest Between Blocks</label>
+    <div class="pill-row" style="margin-bottom:0;">
+      ${[60,90,120,180].map(v => `<button class="pill ${S._tabataAdvancedBlockRest===v?'active':''}" onclick="S._tabataAdvancedBlockRest=${v};openTabataAdvancedSetup()">${v}s</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:16px;">
+    <label>Warmup / Cooldown</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${[0,180,300].map(v => `<button class="pill ${S._tabataAdvancedWarmup===v?'active':''}" onclick="S._tabataAdvancedWarmup=${v};openTabataAdvancedSetup()">Warmup: ${v===0?'Off':fmtMM(v)}</button>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      ${[0,180,300].map(v => `<button class="pill ${S._tabataAdvancedCooldown===v?'active':''}" onclick="S._tabataAdvancedCooldown=${v};openTabataAdvancedSetup()">Cooldown: ${v===0?'Off':fmtMM(v)}</button>`).join('')}
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <button class="btn-primary btn-full" onclick="saveAndStartTabataAdvanced()" ${S._tabataAdvancedBlocks.length === 0 ? 'disabled style="opacity:0.4;"' : ''}>${icons.play} Save &amp; Start</button>
+    <button class="btn-ghost btn-full" onclick="saveTabataAdvancedWod()">Save Only</button>
+  </div>
+  <button class="btn-ghost btn-full" onclick="hideModal();S._tabataAdvancedBlocks=null;S._tabataAdvancedName=null" style="margin-top:8px;color:var(--text-lo);">Cancel</button>`);
+}
+
+function addTabataAdvancedBlock(blockId) {
+  DB.get('tabataBlocks', blockId).then(blk => {
+    if (!blk) return;
+    if (!S._tabataAdvancedBlocks) S._tabataAdvancedBlocks = [];
+    S._tabataAdvancedBlocks.push(blk);
+    openTabataAdvancedSetup();
+  });
+}
+
+async function saveTabataAdvancedWod() {
+  const name = (document.getElementById('tabata-adv-name')?.value || S._tabataAdvancedName || '').trim() || `Tabata · ${todayStr()}`;
+  if (S._tabataAdvancedBlocks.length === 0) { toast('Add at least one block'); return; }
+  const wod = {
+    id: uid(), name, isPrebuilt: false, createdAt: Date.now(), tags: [],
+    tabataMode: true,
+    tabataBlocks: S._tabataAdvancedBlocks.map(b => b.id),
+    tabataBlockRest: S._tabataAdvancedBlockRest || 60,
+    tabataWarmup: S._tabataAdvancedWarmup || 0,
+    tabataCooldown: S._tabataAdvancedCooldown || 0
+  };
+  await DB.put('wods', wod);
+  toast('Tabata WOD saved');
+  S._tabataAdvancedBlocks = null;
+  S._tabataAdvancedName = null;
+  hideModal();
+  nav('wod-library');
+}
+
+async function saveAndStartTabataAdvanced() {
+  const name = (document.getElementById('tabata-adv-name')?.value || S._tabataAdvancedName || '').trim() || `Tabata · ${todayStr()}`;
+  if (!S._tabataAdvancedBlocks || S._tabataAdvancedBlocks.length === 0) { toast('Add at least one block'); return; }
+  const wod = {
+    id: uid(), name, isPrebuilt: false, createdAt: Date.now(), tags: [],
+    tabataMode: true,
+    tabataBlocks: S._tabataAdvancedBlocks.map(b => b.id),
+    tabataBlockRest: S._tabataAdvancedBlockRest || 60,
+    tabataWarmup: S._tabataAdvancedWarmup || 0,
+    tabataCooldown: S._tabataAdvancedCooldown || 0
+  };
+  await DB.put('wods', wod);
+  startTabataAdvancedFromSetup();
+}
+
+async function startTabataAdvancedFromSetup() {
+  const name = (document.getElementById('tabata-adv-name')?.value || S._tabataAdvancedName || '').trim() || `Tabata · ${todayStr()}`;
+  const blocks = S._tabataAdvancedBlocks || [];
+  if (blocks.length === 0) { toast('Add at least one block'); return; }
+  hideModal();
+
+  const th = S.tabataHiit;
+  th.mode = 'tabata-advanced';
+  th.active = false; th.paused = false;
+  th.startMs = 0; th.totalPausedMs = 0; th.pauseStartMs = 0;
+  th.sessionId = uid();
+  th.wod = { name };
+  th.blocks = JSON.parse(JSON.stringify(blocks));
+  th.blockIdx = 0; th.slotIdx = 0;
+  th.warmupDuration = S._tabataAdvancedWarmup || 0;
+  th.cooldownDuration = S._tabataAdvancedCooldown || 0;
+  th.blockRestDuration = S._tabataAdvancedBlockRest || 60;
+  th.workDuration = 20; th.restDuration = 10;
+  th.currentRound = 1; th.totalRounds = blocks.length;
+  th.halfFired = false; th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  const allExercises = await DB.all('exercises');
+  for (const blk of th.blocks) {
+    for (const slot of blk.slots) {
+      slot._exercise = slot.exerciseId ? allExercises.find(e => e.id === slot.exerciseId) : null;
+    }
+  }
+
+  S._tabataAdvancedBlocks = null;
+  S._tabataAdvancedName = null;
+
+  showScreen('timer');
+  if (th.warmupDuration > 0) {
+    startTabataHiitPhase('warmup', th.warmupDuration);
+  } else {
+    startTabataHiitPhase('work', 20);
+  }
+}
+
+async function startTabataAdvancedWod(id) {
+  const wod = await DB.get('wods', id);
+  if (!wod) return;
+  const blockIds = wod.tabataBlocks || [];
+  const blocks = [];
+  const allExercises = await DB.all('exercises');
+  for (const bid of blockIds) {
+    const blk = await DB.get('tabataBlocks', bid);
+    if (blk) {
+      const loaded = JSON.parse(JSON.stringify(blk));
+      for (const slot of loaded.slots) {
+        slot._exercise = slot.exerciseId ? allExercises.find(e => e.id === slot.exerciseId) : null;
+      }
+      blocks.push(loaded);
+    }
+  }
+  if (blocks.length === 0) { toast('No blocks found in this WOD'); return; }
+
+  const th = S.tabataHiit;
+  th.mode = 'tabata-advanced';
+  th.active = false; th.paused = false;
+  th.startMs = 0; th.totalPausedMs = 0; th.pauseStartMs = 0;
+  th.sessionId = uid();
+  th.wod = wod;
+  th.blocks = blocks;
+  th.blockIdx = 0; th.slotIdx = 0;
+  th.warmupDuration = wod.tabataWarmup || 0;
+  th.cooldownDuration = wod.tabataCooldown || 0;
+  th.blockRestDuration = wod.tabataBlockRest || 60;
+  th.workDuration = 20; th.restDuration = 10;
+  th.currentRound = 1; th.totalRounds = blocks.length;
+  th.halfFired = false; th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  showScreen('timer');
+  if (th.warmupDuration > 0) {
+    startTabataHiitPhase('warmup', th.warmupDuration);
+  } else {
+    startTabataHiitPhase('work', 20);
+  }
+}
+
+// ============================================================
+// HIIT MODE
+// ============================================================
+
+function openHiitSetupModal() {
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.34em;color:var(--interval);margin-bottom:5px;">New Workout</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;text-transform:uppercase;color:var(--text-hi);">HIIT</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--interval) 0%,rgba(100,160,255,0.2) 50%,transparent 100%);margin-top:8px;margin-bottom:20px;"></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div style="background:var(--bg-lift);border:1px solid var(--rule);border-radius:var(--radius-card);padding:16px;cursor:pointer;" onclick="hideModal();openHiitSimpleSetup()">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Simple</div>
+      <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Pure timer. Set your intervals and go.</div>
+    </div>
+    <div style="background:var(--bg-lift);border:1px solid rgba(100,160,255,0.2);border-radius:var(--radius-card);padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="hideModal();openHiitAdvancedSetup()">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--interval);"></div>
+      <div style="padding-left:8px;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;color:var(--text-hi);margin-bottom:4px;">Advanced</div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-mid);">Add exercises. Save to library.</div>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:16px;">
+    <button class="btn-ghost btn-full" onclick="hideModal()">Cancel</button>
+  </div>`);
+}
+
+function openHiitSimpleSetup() {
+  const hs = S.hiitSimple;
+  const warmupOptions = [{ v: 0, l: 'Off' }, { v: 180, l: '3 min' }, { v: 300, l: '5 min' }];
+  const cooldownOptions = [{ v: 0, l: 'Off' }, { v: 180, l: '3 min' }, { v: 300, l: '5 min' }];
+
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">HIIT Simple</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--interval) 0%,transparent 60%);margin-top:8px;margin-bottom:16px;"></div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Warmup</label>
+    <div class="pill-row" style="margin-bottom:0;">
+      ${warmupOptions.map(o => `<button class="pill ${hs.warmup===o.v?'active':''}" onclick="S.hiitSimple.warmup=${o.v};openHiitSimpleSetup()">${o.l}</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="form-row-2" style="margin-bottom:12px;">
+    <div>
+      <label>Work (seconds)</label>
+      <input type="number" value="${hs.work}" inputmode="numeric" onfocus="this.select()"
+        onchange="S.hiitSimple.work=parseInt(this.value)||20"/>
+    </div>
+    <div>
+      <label>Rest (seconds)</label>
+      <input type="number" value="${hs.rest}" inputmode="numeric" onfocus="this.select()"
+        onchange="S.hiitSimple.rest=parseInt(this.value)||10"/>
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:12px;">
+    <label>Rounds</label>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+      <button class="btn-ghost btn-sm" onclick="S.hiitSimple.rounds=Math.max(1,S.hiitSimple.rounds-1);openHiitSimpleSetup()" style="min-width:36px;width:36px;height:36px;min-height:36px;font-size:18px;padding:0;">−</button>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:32px;color:var(--text-hi);min-width:40px;text-align:center;">${hs.rounds}</div>
+      <button class="btn-ghost btn-sm" onclick="S.hiitSimple.rounds++;openHiitSimpleSetup()" style="min-width:36px;width:36px;height:36px;min-height:36px;font-size:18px;padding:0;">+</button>
+    </div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-lo);margin-top:6px;">${hs.rounds} rounds · ${fmtMM(hs.rounds * (hs.work + hs.rest))} active</div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:16px;">
+    <label>Cooldown</label>
+    <div class="pill-row" style="margin-bottom:0;">
+      ${cooldownOptions.map(o => `<button class="pill ${hs.cooldown===o.v?'active':''}" onclick="S.hiitSimple.cooldown=${o.v};openHiitSimpleSetup()">${o.l}</button>`).join('')}
+    </div>
+  </div>
+
+  <button class="btn-primary btn-full" onclick="saveHiitSimpleSettings();hideModal();startHiitSimple()">Start</button>
+  <button class="btn-ghost btn-full" onclick="hideModal()" style="margin-top:8px;">Cancel</button>`);
+}
+
+function saveHiitSimpleSettings() {
+  DB.put('settings', { id: 'hiit-simple-last', ...S.hiitSimple });
+}
+
+function startHiitSimple() {
+  const hs = S.hiitSimple;
+  const th = S.tabataHiit;
+  th.mode = 'hiit-simple';
+  th.active = false; th.paused = false;
+  th.startMs = 0; th.totalPausedMs = 0; th.pauseStartMs = 0;
+  th.sessionId = uid(); th.wod = null;
+  th.blocks = []; th.blockIdx = 0; th.slotIdx = 0;
+  th.exercises = [];
+  th.exerciseIdx = 0;
+  th.warmupDuration = hs.warmup;
+  th.cooldownDuration = hs.cooldown;
+  th.blockRestDuration = 0;
+  th.workDuration = hs.work;
+  th.restDuration = hs.rest;
+  th.currentRound = 1;
+  th.totalRounds = hs.rounds;
+  th.halfFired = false; th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  showScreen('timer');
+  if (hs.warmup > 0) {
+    startTabataHiitPhase('warmup', hs.warmup);
+  } else {
+    startTabataHiitPhase('work', hs.work);
+  }
+}
+
+async function openHiitAdvancedSetup() {
+  if (!S._hiitAdvancedExercises) S._hiitAdvancedExercises = [];
+  if (!S._hiitAdvancedName) S._hiitAdvancedName = `HIIT · ${todayStr()}`;
+  if (!S._hiitAdvancedWork) S._hiitAdvancedWork = 40;
+  if (!S._hiitAdvancedRest) S._hiitAdvancedRest = 20;
+  if (!S._hiitAdvancedRounds) S._hiitAdvancedRounds = 8;
+  if (!S._hiitAdvancedWarmup) S._hiitAdvancedWarmup = 0;
+  if (!S._hiitAdvancedCooldown) S._hiitAdvancedCooldown = 0;
+
+  const addedHtml = S._hiitAdvancedExercises.length > 0
+    ? S._hiitAdvancedExercises.map((e, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--rule);">
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--text-lo);min-width:16px;">${i+1}</span>
+        <div style="flex:1;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;text-transform:uppercase;color:var(--text-hi);">${esc(e.name)}</div>
+          <input type="number" value="${e._weight||0}" inputmode="numeric" placeholder="0 kg" style="width:60px;margin-top:3px;" onfocus="this.select()"
+            onchange="S._hiitAdvancedExercises[${i}]._weight=parseFloat(this.value)||0"/>
+          <span style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-lo);margin-left:4px;">kg</span>
+        </div>
+        <button onclick="S._hiitAdvancedExercises.splice(${i},1);openHiitAdvancedSetup()" style="background:none;border:none;color:var(--error);cursor:pointer;padding:4px;">✕</button>
+      </div>`).join('')
+    : `<div style="font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-lo);padding:8px 0;">No exercises added yet.</div>`;
+
+  showModal(`
+  <div style="margin-bottom:14px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">HIIT Advanced</div>
+    <div style="height:1px;background:linear-gradient(90deg,var(--interval) 0%,transparent 60%);margin-top:8px;margin-bottom:16px;"></div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:10px;">
+    <label>Name</label>
+    <input type="text" id="hiit-adv-name" value="${esc(S._hiitAdvancedName)}" onfocus="this.select()" onchange="S._hiitAdvancedName=this.value"/>
+  </div>
+
+  <div class="form-row-2" style="margin-bottom:10px;">
+    <div><label>Work (s)</label>
+      <input type="number" value="${S._hiitAdvancedWork}" inputmode="numeric" onfocus="this.select()" onchange="S._hiitAdvancedWork=parseInt(this.value)||20"/>
+    </div>
+    <div><label>Rest (s)</label>
+      <input type="number" value="${S._hiitAdvancedRest}" inputmode="numeric" onfocus="this.select()" onchange="S._hiitAdvancedRest=parseInt(this.value)||10"/>
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:10px;">
+    <label>Rounds</label>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+      <button class="btn-ghost btn-sm" onclick="S._hiitAdvancedRounds=Math.max(1,S._hiitAdvancedRounds-1);openHiitAdvancedSetup()" style="min-width:32px;width:32px;height:32px;min-height:32px;font-size:16px;padding:0;">−</button>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:28px;color:var(--text-hi);min-width:32px;text-align:center;">${S._hiitAdvancedRounds}</div>
+      <button class="btn-ghost btn-sm" onclick="S._hiitAdvancedRounds++;openHiitAdvancedSetup()" style="min-width:32px;width:32px;height:32px;min-height:32px;font-size:16px;padding:0;">+</button>
+    </div>
+  </div>
+
+  <div style="margin-bottom:10px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin-bottom:6px;">Exercises</div>
+    ${addedHtml}
+    <button class="btn-ghost btn-sm" onclick="openHiitExercisePicker()" style="margin-top:8px;color:var(--interval);border-color:rgba(100,160,255,0.3);">+ Add Exercise</button>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-bottom:8px;">
+    ${[0,180,300].map(v => `<button class="pill ${S._hiitAdvancedWarmup===v?'active':''}" onclick="S._hiitAdvancedWarmup=${v};openHiitAdvancedSetup()">Warmup: ${v===0?'Off':fmtMM(v)}</button>`).join('')}
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    ${[0,180,300].map(v => `<button class="pill ${S._hiitAdvancedCooldown===v?'active':''}" onclick="S._hiitAdvancedCooldown=${v};openHiitAdvancedSetup()">Cooldown: ${v===0?'Off':fmtMM(v)}</button>`).join('')}
+  </div>
+
+  <div style="display:flex;gap:8px;">
+    <button class="btn-ghost btn-full" onclick="saveHiitAdvancedWod()">Save</button>
+    <button class="btn-primary btn-full" onclick="startHiitAdvancedFromSetup()">Start</button>
+  </div>
+  <button class="btn-ghost btn-full" onclick="hideModal();S._hiitAdvancedExercises=null;S._hiitAdvancedName=null" style="margin-top:8px;color:var(--text-lo);">Cancel</button>`);
+}
+
+async function openHiitExercisePicker() {
+  const exercises = await DB.all('exercises');
+  const usable = exercises.filter(e => e.equipment !== 'cardio' && e.equipment !== 'interval');
+
+  let listHtml = '';
+  const grouped = {};
+  for (const ex of usable) {
+    if (!grouped[ex.equipment]) grouped[ex.equipment] = [];
+    grouped[ex.equipment].push(ex);
+  }
+  for (const [eq, exList] of Object.entries(grouped)) {
+    listHtml += `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--text-lo);margin:12px 0 6px;">${eqLabel(eq)}</div>`;
+    for (const ex of exList) {
+      listHtml += `<div class="list-item" onclick="addHiitExercise('${esc(ex.id)}','${esc(ex.name)}')" style="cursor:pointer;">
+        <div style="flex:1;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:15px;text-transform:uppercase;">${esc(ex.name)}</div>
+      </div>`;
+    }
+  }
+
+  showModal(`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;">Add Exercise</div>
+    <button class="btn-ghost btn-sm" onclick="openHiitAdvancedSetup()" style="min-width:36px;width:36px;padding:0;">✕</button>
+  </div>
+  <div style="max-height:65vh;overflow-y:auto;">${listHtml}</div>`);
+}
+
+function addHiitExercise(id, name) {
+  if (!S._hiitAdvancedExercises) S._hiitAdvancedExercises = [];
+  S._hiitAdvancedExercises.push({ id, name, _weight: 0 });
+  openHiitAdvancedSetup();
+}
+
+async function saveHiitAdvancedWod() {
+  const name = (document.getElementById('hiit-adv-name')?.value || S._hiitAdvancedName || '').trim() || `HIIT · ${todayStr()}`;
+  const wod = {
+    id: uid(), name, isPrebuilt: false, createdAt: Date.now(), tags: [],
+    hiitMode: true,
+    hiitWork: S._hiitAdvancedWork || 40,
+    hiitRest: S._hiitAdvancedRest || 20,
+    hiitRounds: S._hiitAdvancedRounds || 8,
+    hiitExercises: (S._hiitAdvancedExercises || []).map(e => ({ id: e.id, name: e.name, weight: e._weight || 0 })),
+    hiitWarmup: S._hiitAdvancedWarmup || 0,
+    hiitCooldown: S._hiitAdvancedCooldown || 0
+  };
+  await DB.put('wods', wod);
+  toast('HIIT WOD saved');
+  S._hiitAdvancedExercises = null; S._hiitAdvancedName = null;
+  hideModal();
+  nav('wod-library');
+}
+
+function startHiitAdvancedFromSetup() {
+  const exercises = (S._hiitAdvancedExercises || []).map(e => ({ id: e.id, name: e.name, weight: e._weight || 0 }));
+  const th = S.tabataHiit;
+  th.mode = 'hiit-advanced';
+  th.active = false; th.paused = false;
+  th.startMs = 0; th.totalPausedMs = 0; th.pauseStartMs = 0;
+  th.sessionId = uid();
+  th.wod = { name: S._hiitAdvancedName || `HIIT · ${todayStr()}` };
+  th.exercises = exercises;
+  th.exerciseIdx = 0;
+  th.warmupDuration = S._hiitAdvancedWarmup || 0;
+  th.cooldownDuration = S._hiitAdvancedCooldown || 0;
+  th.blockRestDuration = 0;
+  th.workDuration = S._hiitAdvancedWork || 40;
+  th.restDuration = S._hiitAdvancedRest || 20;
+  th.currentRound = 1;
+  th.totalRounds = S._hiitAdvancedRounds || 8;
+  th.halfFired = false; th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  S._hiitAdvancedExercises = null; S._hiitAdvancedName = null;
+  hideModal();
+  showScreen('timer');
+  if (th.warmupDuration > 0) {
+    startTabataHiitPhase('warmup', th.warmupDuration);
+  } else {
+    startTabataHiitPhase('work', th.workDuration);
+  }
+}
+
+async function startHiitAdvancedWod(id) {
+  const wod = await DB.get('wods', id);
+  if (!wod) return;
+  const th = S.tabataHiit;
+  th.mode = 'hiit-advanced';
+  th.active = false; th.paused = false;
+  th.startMs = 0; th.totalPausedMs = 0; th.pauseStartMs = 0;
+  th.sessionId = uid(); th.wod = wod;
+  th.exercises = wod.hiitExercises || [];
+  th.exerciseIdx = 0;
+  th.warmupDuration = wod.hiitWarmup || 0;
+  th.cooldownDuration = wod.hiitCooldown || 0;
+  th.blockRestDuration = 0;
+  th.workDuration = wod.hiitWork || 40;
+  th.restDuration = wod.hiitRest || 20;
+  th.currentRound = 1; th.totalRounds = wod.hiitRounds || 8;
+  th.halfFired = false; th.fiveCountFired = 0;
+  th.phaseLapLog = []; th.currentPhaseStartMs = 0;
+
+  showScreen('timer');
+  if (th.warmupDuration > 0) {
+    startTabataHiitPhase('warmup', th.warmupDuration);
+  } else {
+    startTabataHiitPhase('work', th.workDuration);
+  }
+}
+
+// ============================================================
+// TABATA / HIIT PHASE ENGINE
+// ============================================================
+
+function startTabataHiitPhase(phase, durationSecs) {
+  const th = S.tabataHiit;
+  th.phase = phase;
+  th.active = true;
+  th.paused = false;
+
+  if (th.startMs === 0) th.startMs = performance.now();
+
+  const dur = durationSecs * 1000;
+  th.phaseEndMs = performance.now() + dur;
+  th.currentPhaseStartMs = performance.now();
+  th.halfFired = false;
+  th.fiveCountFired = 0;
+
+  if (S.settings.voiceMode !== 'none') {
+    if (phase === 'warmup') {
+      speak('Warmup starting');
+    } else if (phase === 'work') {
+      const label = getTabataHiitCurrentLabel();
+      if (label) speak(speakify(label));
+    } else if (phase === 'rest') {
+      const nextLabel = getTabataHiitNextLabel();
+      speak(nextLabel ? `Rest. Next up: ${speakify(nextLabel)}` : 'Rest');
+    } else if (phase === 'blockRest') {
+      const th2 = S.tabataHiit;
+      const nextBlock = th2.blocks[th2.blockIdx + 1];
+      speak(nextBlock ? `Block complete. Rest for ${fmtSpeak(th2.blockRestDuration)}` : 'Block complete. Rest.');
+    } else if (phase === 'cooldown') {
+      speak('All stations completed. Begin cooldown');
+    }
+  }
+
+  reqWakeLock();
+  renderTabataHiitScreen();
+  th.rafId = requestAnimationFrame(tabataHiitTick);
+}
+
+function getTabataHiitCurrentLabel() {
+  const th = S.tabataHiit;
+  if (th.mode === 'tabata-advanced') {
+    const blk = th.blocks[th.blockIdx];
+    if (!blk) return null;
+    const slot = blk.slots[th.slotIdx];
+    if (!slot || !slot._exercise) return null;
+    const weightStr = slot.weight ? `, ${slot.weight} kilograms` : '';
+    return `${slot._exercise.name}${weightStr}`;
+  }
+  if (th.mode === 'hiit-advanced') {
+    const ex = th.exercises[th.exerciseIdx];
+    if (!ex) return null;
+    const weightStr = ex.weight ? `, ${ex.weight} kilograms` : '';
+    return `${ex.name}${weightStr}`;
+  }
+  return null;
+}
+
+function getTabataHiitNextLabel() {
+  const th = S.tabataHiit;
+  if (th.mode === 'tabata-simple') return null;
+  if (th.mode === 'tabata-advanced') {
+    const blk = th.blocks[th.blockIdx];
+    if (!blk) return null;
+    const nextSlotIdx = th.slotIdx + 1;
+    if (nextSlotIdx < blk.slots.length) {
+      const slot = blk.slots[nextSlotIdx];
+      return slot?._exercise?.name || null;
+    }
+    return null;
+  }
+  if (th.mode === 'hiit-advanced') {
+    const nextIdx = (th.exerciseIdx + 1) % th.exercises.length;
+    return th.exercises[nextIdx]?.name || null;
+  }
+  return null;
+}
+
+function tabataHiitTick() {
+  const th = S.tabataHiit;
+  if (!th.active || th.paused) return;
+
+  const nowMs = performance.now();
+  const remaining = th.phaseEndMs - nowMs;
+
+  const cdEl = document.getElementById('th-countdown');
+  if (cdEl) cdEl.textContent = fmtMM(Math.max(0, remaining) / 1000);
+
+  const totalEl = document.getElementById('th-total');
+  if (totalEl) totalEl.textContent = fmtMM((nowMs - th.startMs - th.totalPausedMs) / 1000);
+
+  if ((th.phase === 'warmup' || th.phase === 'cooldown') && S.settings.voiceMode !== 'none') {
+    const phaseDur = th.phase === 'warmup' ? th.warmupDuration : th.cooldownDuration;
+    const elapsed = phaseDur - (remaining / 1000);
+    if (!th.halfFired && elapsed >= phaseDur / 2) {
+      th.halfFired = true;
+      speak(th.phase === 'warmup' ? 'Halfway through warmup' : 'Halfway through cooldown');
+    }
+  }
+
+  if (S.settings.voiceMode !== 'none') {
+    const remSecs = Math.round(remaining / 1000);
+    if (remSecs <= 5 && remSecs >= 1 && th.fiveCountFired !== remSecs) {
+      th.fiveCountFired = remSecs;
+      if (th.phase === 'warmup' && remSecs <= 3) speak(String(remSecs));
+      if (th.phase === 'work') speak(String(remSecs));
+      if (th.phase === 'rest' && remSecs <= 3) speak(String(remSecs));
+    }
+  }
+
+  if (remaining <= 0) {
+    advanceTabataHiitPhase();
+    return;
+  }
+
+  th.rafId = requestAnimationFrame(tabataHiitTick);
+}
+
+function advanceTabataHiitPhase() {
+  const th = S.tabataHiit;
+  cancelAnimationFrame(th.rafId);
+  th.active = false;
+
+  // Log the phase that just completed with real timing
+  th.phaseLapLog.push({
+    phase: th.phase,
+    blockIdx: th.blockIdx,
+    roundNum: th.currentRound,
+    startMs: th.currentPhaseStartMs || th.startMs,
+    endMs: performance.now()
+  });
+
+  const mode = th.mode;
+  const isSimple = mode === 'tabata-simple' || mode === 'hiit-simple';
+  const isTabata = mode === 'tabata-simple' || mode === 'tabata-advanced';
+
+  beep(880, 0.2, 0.5);
+
+  if (th.phase === 'warmup') {
+    if (S.settings.voiceMode !== 'none') speak('Warmup ending in 3, 2, 1');
+    setTimeout(() => {
+      th.slotIdx = 0; th.blockIdx = 0; th.exerciseIdx = 0; th.currentRound = 1;
+      startTabataHiitPhase('work', isTabata ? 20 : th.workDuration);
+    }, 1000);
+    return;
+  }
+
+  if (th.phase === 'work') {
+    startTabataHiitPhase('rest', isTabata ? 10 : th.restDuration);
+    return;
+  }
+
+  if (th.phase === 'rest') {
+    if (isTabata) {
+      const blk = th.blocks[th.blockIdx];
+      const totalSlots = isSimple ? 8 : (blk ? blk.slots.length : 8);
+      th.slotIdx++;
+      if (th.slotIdx >= totalSlots) {
+        th.slotIdx = 0;
+        th.blockIdx++;
+        if (th.blockIdx >= th.totalRounds) {
+          endTabataHiitWorkout();
+          return;
+        }
+        startTabataHiitPhase('blockRest', th.blockRestDuration);
+        return;
+      }
+      startTabataHiitPhase('work', 20);
+    } else {
+      const exerciseCount = isSimple ? 1 : th.exercises.length;
+      if (!isSimple) {
+        th.exerciseIdx = (th.exerciseIdx + 1) % exerciseCount;
+      }
+      if (isSimple || th.exerciseIdx === 0) {
+        th.currentRound++;
+        if (th.currentRound > th.totalRounds) {
+          endTabataHiitWorkout();
+          return;
+        }
+      }
+      startTabataHiitPhase('work', th.workDuration);
+    }
+    return;
+  }
+
+  if (th.phase === 'blockRest') {
+    th.currentRound = th.blockIdx + 1;
+    startTabataHiitPhase('work', isTabata ? 20 : th.workDuration);
+    return;
+  }
+
+  if (th.phase === 'cooldown') {
+    if (S.settings.voiceMode !== 'none') speak('Cooldown complete');
+    setTimeout(() => showTabataHiitComplete(), 500);
+    return;
+  }
+}
+
+function endTabataHiitWorkout() {
+  const th = S.tabataHiit;
+
+  // Embedded in Standard session — return control instead of showing complete modal
+  if (th.embeddedInStandard) {
+    th.active = false;
+    cancelAnimationFrame(th.rafId);
+    if (S.settings.voiceMode !== 'none') speak('Block complete');
+    beep(880, 0.15, 0.8);
+    const blockDurationMs = performance.now() - th.embeddedBlockStartMs;
+    setTimeout(() => returnToStandardTimer(blockDurationMs), 400);
+    return;
+  }
+
+  if (S.settings.voiceMode !== 'none') {
+    const nowMs = performance.now();
+    const wallMs = nowMs - th.startMs;
+    speak(speakify(`All stations completed. Total time, ${fmtSpeak(wallMs / 1000)}`));
+  }
+  if (th.cooldownDuration > 0) {
+    startTabataHiitPhase('cooldown', th.cooldownDuration);
+  } else {
+    setTimeout(() => showTabataHiitComplete(), 600);
+  }
+}
+
+function showTabataHiitComplete() {
+  const th = S.tabataHiit;
+  th.active = false;
+  relWakeLock();
+  cancelAnimationFrame(th.rafId);
+  const nowMs = performance.now();
+  const totalMs = nowMs - th.startMs - th.totalPausedMs;
+  const wallClockMs = nowMs - th.startMs;
+
+  const isSimple = th.mode === 'tabata-simple' || th.mode === 'hiit-simple';
+  const isTabata = th.mode === 'tabata-simple' || th.mode === 'tabata-advanced';
+  const defaultName = isTabata
+    ? (isSimple ? `Tabata Simple · ${todayStr()}` : (th.wod?.name || `Tabata · ${todayStr()}`))
+    : (isSimple ? `HIIT Simple · ${todayStr()}` : (th.wod?.name || `HIIT · ${todayStr()}`));
+
+  showModal(`
+  <div style="text-align:center;padding:8px 0;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:56px;color:var(--text-hi);margin-bottom:8px;letter-spacing:-2px;">${fmtFull(totalMs/1000)}</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;text-transform:uppercase;margin-bottom:4px;">Workout Complete!</div>
+    <div style="font-family:'DM Sans',sans-serif;color:var(--text-mid);font-size:14px;margin-bottom:24px;">${esc(defaultName)}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn-primary btn-full" onclick="saveTabataHiitSession(${wallClockMs})">Save &amp; View Summary</button>
+      <button class="btn-ghost btn-full" onclick="hideModal();nav('home')" style="color:var(--text-mid);font-size:14px;">Discard</button>
+    </div>
+  </div>`);
+}
+
+async function saveTabataHiitSession(wallClockMs) {
+  const th = S.tabataHiit;
+  const isSimple = th.mode === 'tabata-simple' || th.mode === 'hiit-simple';
+  const isTabata = th.mode === 'tabata-simple' || th.mode === 'tabata-advanced';
+  const defaultName = isTabata
+    ? (isSimple ? `Tabata Simple · ${todayStr()}` : (th.wod?.name || `Tabata · ${todayStr()}`))
+    : (isSimple ? `HIIT Simple · ${todayStr()}` : (th.wod?.name || `HIIT · ${todayStr()}`));
+
+  // Build laps from phaseLapLog — real measured durations
+  const lapsArr = [];
+  let lapNum = 1;
+
+  if (isTabata) {
+    // Group work+rest phases by blockIdx into one exercise lap per block
+    const blockGroups = {};
+    const blockRests = [];
+    for (const entry of th.phaseLapLog) {
+      const dur = (entry.endMs - entry.startMs) / 1000;
+      if (entry.phase === 'work' || entry.phase === 'rest') {
+        const bi = entry.blockIdx;
+        if (!blockGroups[bi]) blockGroups[bi] = 0;
+        blockGroups[bi] += dur;
+      } else if (entry.phase === 'blockRest') {
+        // blockIdx here is already the next block (post-increment), so afterBlock = blockIdx - 1
+        blockRests.push({ afterBlock: entry.blockIdx - 1, dur });
+      }
+    }
+    const blockKeys = Object.keys(blockGroups).map(Number).sort((a, b) => a - b);
+    for (const bi of blockKeys) {
+      const blkName = (!isSimple && th.blocks[bi]) ? th.blocks[bi].name : `Block ${bi + 1}`;
+      lapsArr.push({ lapNumber: lapNum++, type: 'exercise', label: blkName, duration: Math.round(blockGroups[bi]), continued: false });
+      const rest = blockRests.find(r => r.afterBlock === bi);
+      if (rest) {
+        lapsArr.push({ lapNumber: lapNum++, type: 'pause', label: 'Block Rest', duration: Math.round(rest.dur), continued: false });
+      }
+    }
+  } else {
+    // HIIT: group work+rest phases by roundNum into one exercise lap per round
+    const roundGroups = {};
+    for (const entry of th.phaseLapLog) {
+      if (entry.phase === 'work' || entry.phase === 'rest') {
+        const r = entry.roundNum;
+        if (!roundGroups[r]) roundGroups[r] = 0;
+        roundGroups[r] += (entry.endMs - entry.startMs) / 1000;
+      }
+    }
+    const roundKeys = Object.keys(roundGroups).map(Number).sort((a, b) => a - b);
+    for (const r of roundKeys) {
+      lapsArr.push({ lapNumber: lapNum++, type: 'exercise', label: `Round ${r}`, duration: Math.round(roundGroups[r]), continued: false });
+    }
+  }
+
+  const session = {
+    id: th.sessionId || uid(),
+    wodId: th.wod?.id || null,
+    wodName: defaultName,
+    tabataMode: isTabata,
+    hiitMode: !isTabata,
+    tabataHiitSubmode: th.mode,
+    startedAt: Date.now() - wallClockMs,
+    endedAt: Date.now(),
+    totalDuration: wallClockMs / 1000,
+    blocksCompleted: isTabata ? (th.blockIdx || th.totalRounds) : 0,
+    roundsCompleted: !isTabata ? (th.currentRound > 1 ? th.currentRound - 1 : th.totalRounds) : 0,
+    laps: lapsArr,
+    journalPending: true,
+    journal: null
+  };
+
+  await DB.put('sessions', session);
+  hideModal();
+  S.summaryId = session.id;
+  await nav('summary', { sessionId: session.id });
+}
+
+function pauseTabataHiit() {
+  const th = S.tabataHiit;
+  if (!th.active || th.paused) return;
+  const nowMs = performance.now();
+  th.phaseRemaining = Math.max(0, th.phaseEndMs - nowMs);
+  th.phaseEndMs = 0;
+  th.paused = true;
+  th.pauseStartMs = nowMs;
+  cancelAnimationFrame(th.rafId);
+  relWakeLock();
+  if (S.settings.voiceMode !== 'none') speak('Training paused');
+  document.getElementById('pause-overlay').style.display = 'flex';
+  th.pauseRafId = requestAnimationFrame(pauseTabataHiitTick);
+}
+
+function resumeTabataHiit() {
+  const th = S.tabataHiit;
+  if (!th.active || !th.paused) return;
+  const nowMs = performance.now();
+  th.totalPausedMs += nowMs - th.pauseStartMs;
+  th.paused = false;
+  th.phaseEndMs = nowMs + (th.phaseRemaining || 0);
+  th.phaseRemaining = 0;
+  cancelAnimationFrame(th.pauseRafId);
+  reqWakeLock();
+  document.getElementById('pause-overlay').style.display = 'none';
+  if (S.settings.voiceMode !== 'none') speak('Training resumed');
+  th.rafId = requestAnimationFrame(tabataHiitTick);
+}
+
+function pauseTabataHiitTick() {
+  const th = S.tabataHiit;
+  if (!th.paused) return;
+  const pauseEl = document.getElementById('pause-counter');
+  if (pauseEl) pauseEl.textContent = fmtMM((performance.now() - th.pauseStartMs) / 1000);
+  th.pauseRafId = requestAnimationFrame(pauseTabataHiitTick);
+}
+
+function renderTabataHiitScreen() {
+  const th = S.tabataHiit;
+  const screen = document.getElementById('screen-timer');
+  if (!screen) return;
+
+  const isTabata = th.mode === 'tabata-simple' || th.mode === 'tabata-advanced';
+  const isSimple = th.mode === 'tabata-simple' || th.mode === 'hiit-simple';
+  const phase = th.phase;
+
+  const phaseColors = {
+    warmup: 'var(--text-mid)', work: 'var(--text-hi)',
+    rest: 'var(--bronze)', blockRest: 'var(--bronze)', cooldown: 'var(--text-mid)'
+  };
+  const phaseLabels = {
+    warmup: 'WARMUP', work: 'WORK', rest: 'REST',
+    blockRest: 'REST', cooldown: 'COOLDOWN'
+  };
+  const phaseColor = phaseColors[phase] || 'var(--text-hi)';
+  const phaseLabel = phaseLabels[phase] || '';
+
+  let nowName = '';
+  let nowDetail = '';
+  if (!isSimple && phase === 'work') {
+    if (isTabata) {
+      const blk = th.blocks[th.blockIdx];
+      const slot = blk?.slots[th.slotIdx];
+      nowName = slot?._exercise?.name || '';
+      if (slot?.weight) nowDetail = `${slot.weight} kg`;
+    } else {
+      const ex = th.exercises[th.exerciseIdx];
+      nowName = ex?.name || '';
+      if (ex?.weight) nowDetail = `${ex.weight} kg`;
+    }
+  }
+
+  let nextName = '';
+  if (phase === 'work' && !isSimple) {
+    nextName = getTabataHiitNextLabel() || '';
+  }
+
+  let progressLine = '';
+  if (phase === 'warmup') {
+    progressLine = 'WARMUP';
+  } else if (phase === 'cooldown') {
+    progressLine = 'COOLDOWN';
+  } else if (phase === 'blockRest') {
+    progressLine = 'BLOCK REST';
+  } else if (isTabata) {
+    const totalSlots = isSimple ? 8 : (th.blocks[th.blockIdx]?.slots?.length || 8);
+    const blockLabel = !isSimple && th.blocks[th.blockIdx] ? th.blocks[th.blockIdx].name : `Block ${th.blockIdx + 1}`;
+    progressLine = `${blockLabel} · ${th.slotIdx + 1} OF ${totalSlots}`;
+  } else {
+    progressLine = `ROUND ${th.currentRound} OF ${th.totalRounds}`;
+  }
+
+  const nowMs = performance.now();
+  const remainingMs = th.phaseEndMs > 0 ? Math.max(0, th.phaseEndMs - nowMs) : 0;
+  const wallMs = th.startMs > 0 ? (nowMs - th.startMs - th.totalPausedMs) : 0;
+
+  const canGoBack = (isTabata && (th.slotIdx > 0 || th.blockIdx > 0)) || (!isTabata && (th.exerciseIdx > 0 || th.currentRound > 1));
+
+  screen.innerHTML = `
+  <div id="timer-main-layout" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+    <div class="timer-top-bar">
+      <div style="flex:1;"></div>
+    </div>
+
+    <div class="timer-content" id="th-content" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+      ${th.embeddedInStandard ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:11px;text-transform:uppercase;letter-spacing:0.2em;color:var(--yellow);margin-bottom:3px;padding-left:2px;">⚡ TABATA BLOCK</div>` : ''}
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:12px;text-transform:uppercase;color:var(--text-mid);letter-spacing:0.08em;margin-bottom:6px;padding-left:2px;">${progressLine}</div>
+      <div class="now-card">
+        <div class="now-overline" style="color:${phaseColor};">${phaseLabel}</div>
+        ${nowName ? `<div class="now-name">${esc(nowName.toUpperCase())}</div>` : `<div class="now-name" style="color:${phaseColor};">${phaseLabel}</div>`}
+        ${nowDetail ? `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:18px;color:var(--text-mid);margin-top:4px;">${esc(nowDetail)}</div>` : ''}
+      </div>
+
+      <div class="timer-display-card">
+        <div id="th-countdown" class="timer-num" style="color:${phase === 'work' ? 'var(--text-hi)' : 'var(--bronze)'};">${fmtMM(remainingMs / 1000)}</div>
+        <div class="timer-sublabel" style="color:${phase === 'work' ? 'var(--text-hi)' : 'var(--bronze)'};">${phaseLabel}</div>
+        <div class="timer-divider"></div>
+        <div id="th-total" class="timer-num-sub">${fmtMM(wallMs / 1000)}</div>
+        <div class="timer-sublabel">TOTAL TIME</div>
+      </div>
+
+      ${nextName ? `
+      <div class="next-card">
+        <div class="next-overline">Next Up</div>
+        <div class="next-name">${esc(nextName.toUpperCase())}</div>
+      </div>` : (phase === 'rest' || phase === 'blockRest') && !isSimple ? `
+      <div class="next-card">
+        <div class="next-overline">Next Up</div>
+        <div class="next-name">${esc((getTabataHiitNextLabel() || '').toUpperCase())}</div>
+      </div>` : ''}
+      ${th.embeddedInStandard ? `<div style="font-family:'DM Sans',sans-serif;font-size:11px;color:var(--text-xlo);text-align:center;margin-top:8px;padding:0 16px;">LAP is disabled during Tabata Blocks · press › to advance</div>` : ''}
+    </div>
+
+    <div class="timer-lap-bar">
+      <div class="lap-controls-row">
+        <button class="lap-btn-aux" onclick="prevTabataHiitPhase()" style="${!canGoBack ? 'opacity:0;pointer-events:none;' : ''}">‹</button>
+        <button class="lap-btn-aux" onclick="${th.paused ? 'resumeTabataHiit()' : 'pauseTabataHiit()'}" style="flex:1;">${icons.pause}</button>
+        <button class="lap-btn-aux" onclick="skipTabataHiitPhase()">›</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function skipTabataHiitPhase() {
+  cancelAnimationFrame(S.tabataHiit.rafId);
+  advanceTabataHiitPhase();
+}
+
+function prevTabataHiitPhase() {
+  const th = S.tabataHiit;
+  cancelAnimationFrame(th.rafId);
+  if (th.phase === 'work') {
+    if (th.slotIdx > 0) { th.slotIdx--; }
+    else if (th.exerciseIdx > 0) { th.exerciseIdx--; }
+    startTabataHiitPhase('work', th.mode.startsWith('tabata') ? 20 : th.workDuration);
+  } else if (th.phase === 'rest') {
+    startTabataHiitPhase('work', th.mode.startsWith('tabata') ? 20 : th.workDuration);
+  } else {
+    startTabataHiitPhase(th.phase, th.phase === 'warmup' ? th.warmupDuration : th.phase === 'cooldown' ? th.cooldownDuration : th.blockRestDuration);
+  }
 }
 
 function adjustEmomRounds(delta) {
@@ -3464,6 +5161,13 @@ function startTimer() {
     t.intervalEndMs = performance.now() + (t.emomDuration * 1000);
   }
   reqWakeLock();
+  // Check if first station is a Tabata Block
+  const firstSt = t.stations[0];
+  if (firstSt && firstSt.type === 'tabataBlock') {
+    renderTimerScreen();
+    startEmbeddedTabataBlock(firstSt);
+    return;
+  }
   renderTimerScreen();
   t.rafId = requestAnimationFrame(timerTick);
 }
@@ -3594,6 +5298,8 @@ function resumeTimer() {
 
 function pressLap(autoLap = false, isEmomCall = false) {
   const t = S.timer;
+  // Block LAP during embedded Tabata block
+  if (S.tabataHiit.embeddedInStandard) return;
   if (!t.active || t.paused || t.lapLocked) return;
   const nowMs = performance.now();
   const finalSegMs = nowMs - t.stationSegmentStartMs;
@@ -3685,13 +5391,143 @@ function pressLap(autoLap = false, isEmomCall = false) {
     t.amrapTenFired = false;
     t.amrapCountdownFired = 0;
 
-    if (isIntervalStation(t.stations[t.stationIdx], t.exercises)) {
-      t.intervalEndMs = performance.now() + getIntervalDuration(t.stations[t.stationIdx]);
+    const nextSt = t.stations[t.stationIdx];
+
+    // Tabata Block station — hand off to Tabata engine
+    if (nextSt && nextSt.type === 'tabataBlock') {
+      cancelAnimationFrame(t.rafId);
+      renderTimerScreen();
+      startEmbeddedTabataBlock(nextSt);
+      return;
     }
 
-    const nextSt = t.stations[t.stationIdx];
-    speakStation(nextSt, t.exercises, t.complexes);
+    if (isIntervalStation(nextSt, t.exercises)) {
+      t.intervalEndMs = performance.now() + getIntervalDuration(nextSt);
+    }
 
+    speakStation(nextSt, t.exercises, t.complexes);
+    renderTimerScreen();
+    t.rafId = requestAnimationFrame(timerTick);
+  }
+}
+
+async function startEmbeddedTabataBlock(st) {
+  const t = S.timer;
+  const th = S.tabataHiit;
+
+  // Set embedded flag immediately to block any stray LAP taps during async load
+  th.embeddedInStandard = true;
+  th.embeddedBlockStartMs = performance.now();
+
+  // Load block from IndexedDB
+  const blk = await DB.get('tabataBlocks', st.tabataBlockId);
+  if (!blk) {
+    // Block not found — skip station and return to Standard
+    th.embeddedInStandard = false;
+    toast('Tabata Block not found — skipping');
+    t.stationSegmentStartMs = performance.now();
+    renderTimerScreen();
+    t.rafId = requestAnimationFrame(timerTick);
+    return;
+  }
+
+  // Load exercise data for all slots
+  const allExercises = await DB.all('exercises');
+  const loadedBlk = JSON.parse(JSON.stringify(blk));
+  for (const slot of loadedBlk.slots) {
+    slot._exercise = slot.exerciseId ? allExercises.find(e => e.id === slot.exerciseId) : null;
+  }
+
+  // Reset Tabata engine state for this embedded block
+  th.mode = 'tabata-advanced';
+  th.active = false;
+  th.paused = false;
+  th.startMs = 0;
+  th.totalPausedMs = 0;
+  th.pauseStartMs = 0;
+  th.sessionId = null;           // No separate session — part of Standard session
+  th.wod = null;
+  th.blocks = [loadedBlk];
+  th.blockIdx = 0;
+  th.slotIdx = 0;
+  th.warmupDuration = 0;         // No warmup/cooldown inside embedded block
+  th.cooldownDuration = 0;
+  th.blockRestDuration = 0;
+  th.workDuration = 20;
+  th.restDuration = 10;
+  th.currentRound = 1;
+  th.totalRounds = 1;            // One block only
+  th.halfFired = false;
+  th.fiveCountFired = 0;
+  th.phaseLapLog = [];
+  th.currentPhaseStartMs = 0;
+  // embeddedInStandard stays true
+
+  if (S.settings.voiceMode !== 'none') speak(speakify(st.tabataBlockName || 'Tabata Block'));
+
+  startTabataHiitPhase('work', 20);
+}
+
+function returnToStandardTimer(blockDurationMs) {
+  const t = S.timer;
+  const th = S.tabataHiit;
+
+  // Clear embedded state
+  th.embeddedInStandard = false;
+  th.embeddedBlockStartMs = 0;
+  th.active = false;
+  cancelAnimationFrame(th.rafId);
+  relWakeLock();
+
+  // Record the Tabata Block as a lap in the Standard session
+  const st = t.stations[t.stationIdx];
+  const blockName = (st?.tabataBlockName || 'Tabata Block') + ' (TABATA)';
+  t.laps.push({
+    lapNumber: t.currentLapNumber,
+    type: 'exercise',
+    label: blockName,
+    duration: blockDurationMs / 1000,
+    continued: false,
+    startTime: t.stationSegmentStartOffset || 0
+  });
+  t.completedStationTimes.push(blockDurationMs);
+  t.currentLapNumber++;
+  t.canUndo = false;             // No undo after embedded block
+
+  // Resume Standard timer
+  reqWakeLock();
+
+  if (t.stationIdx >= t.stations.length - 1) {
+    // Block was the last station — complete the session
+    t.active = false;
+    t.lapLocked = true;
+    setTimeout(() => { t.lapLocked = false; }, 1000);
+    relWakeLock();
+    setTimeout(() => showWorkoutCompleteModal(), 350);
+  } else {
+    // Advance to next station
+    t.stationIdx++;
+    t.stationSegmentStartMs = performance.now();
+    t.stationSegmentStartOffset = performance.now() - t.startMs;
+    t.intervalEndMs = 0;
+    t.intervalRemaining = 0;
+    t.amrapHalfFired = false;
+    t.amrapTenFired = false;
+    t.amrapCountdownFired = 0;
+
+    const nextSt = t.stations[t.stationIdx];
+
+    // Handle chained Tabata Blocks
+    if (nextSt && nextSt.type === 'tabataBlock') {
+      renderTimerScreen();
+      startEmbeddedTabataBlock(nextSt);
+      return;
+    }
+
+    if (isIntervalStation(nextSt, t.exercises)) {
+      t.intervalEndMs = performance.now() + getIntervalDuration(nextSt);
+    }
+    speakStation(nextSt, t.exercises, t.complexes);
     renderTimerScreen();
     t.rafId = requestAnimationFrame(timerTick);
   }
@@ -4601,7 +6437,7 @@ async function renderSettings() {
   <div class="card" style="margin-top:12px;">
     <div class="settings-row">
       <div class="settings-label">App Version</div>
-      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.5.2</div>
+      <div style="color:var(--text-lo);font-size:14px;">STATIONS v3.6.5</div>
     </div>
   </div>
 
@@ -5064,6 +6900,15 @@ async function init() {
     await seedData();
     await seedTagsIfEmpty();
     await seedTrxIfEmpty();
+    await loadTabataSimpleSettings();
+    const savedHiit = await DB.get('settings', 'hiit-simple-last');
+    if (savedHiit) {
+      S.hiitSimple.warmup = savedHiit.warmup || 0;
+      S.hiitSimple.work = savedHiit.work || 20;
+      S.hiitSimple.rest = savedHiit.rest || 10;
+      S.hiitSimple.rounds = savedHiit.rounds || 8;
+      S.hiitSimple.cooldown = savedHiit.cooldown || 0;
+    }
     if (window.speechSynthesis) {
       voices = speechSynthesis.getVoices();
       if (!voices.length) {
@@ -5072,6 +6917,12 @@ async function init() {
     }
     await renderHome();
     showScreen('home');
+    // What's New modal — show once per version
+    const CURRENT_VERSION = 'v3.6.4';
+    const seenEntry = await DB.get('settings', 'whats-new-seen');
+    if (!seenEntry || seenEntry.version !== CURRENT_VERSION) {
+      setTimeout(() => showWhatsNewModal(), 600);
+    }
     document.addEventListener('touchstart', () => {
       getACtx();
       if (window.speechSynthesis && S.settings.voiceMode !== 'none') {
